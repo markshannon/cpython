@@ -359,6 +359,47 @@ class YieldFromTests(unittest.TestCase):
         self.assertEqual(inspect.getgeneratorstate(gen_b), inspect.GEN_CLOSED)
         self.assertIsNone(gen_b.gi_yieldfrom)
 
+    def test_send_throws_in_nested(self):
+
+        def assertStack(*items):
+            frame = sys._getframe(1)
+            for item in items:
+                self.assertEqual(frame.f_code.co_name, item)
+                frame = frame.f_back
+        def f():
+            assertStack("f")
+            yield from g()
+            assertStack("f")
+
+        def g():
+            assertStack("g", "f")
+            yield from h()
+            assertStack("g", "f")
+
+        def h():
+            assertStack("h", "g", "f")
+            try:
+                yield
+            except Exception:
+                pass
+            assertStack("h", "g", "f")
+
+        gen = f()
+        gen.send(None)
+        try:
+            gen.send(None)
+        except StopIteration:
+            pass
+
+        gen = f()
+        gen.send(None)
+        try:
+            gen.throw(RuntimeError)
+        except StopIteration:
+            pass
+
+
+
 
 tutorial_tests = """
 Let's try a simple generator:

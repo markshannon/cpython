@@ -408,6 +408,65 @@ gen_close(PyGenObject *gen, PyObject *args)
 }
 
 
+static int set_exception_from_values(PyObject *typ, PyObject *val, PyObject *tb) {
+    /* First, check the traceback argument, replacing None with
+       NULL. */
+    if (tb == Py_None) {
+        tb = NULL;
+    }
+    else if (tb != NULL && !PyTraceBack_Check(tb)) {
+        PyErr_SetString(PyExc_TypeError,
+            "throw() third argument must be a traceback object");
+        return -1;
+    }
+
+    Py_INCREF(typ);
+    Py_XINCREF(val);
+    Py_XINCREF(tb);
+
+    if (PyExceptionClass_Check(typ))
+        PyErr_NormalizeException(&typ, &val, &tb);
+
+    else if (PyExceptionInstance_Check(typ)) {
+        /* Raising an instance.  The value should be a dummy. */
+        if (val && val != Py_None) {
+            PyErr_SetString(PyExc_TypeError,
+              "instance exception may not have a separate value");
+            goto failed_throw;
+        }
+        else {
+            /* Normalize to raise <class>, <instance> */
+            Py_XDECREF(val);
+            val = typ;
+            typ = PyExceptionInstance_Class(typ);
+            Py_INCREF(typ);
+
+            if (tb == NULL)
+                /* Returns NULL if there's no traceback */
+                tb = PyException_GetTraceback(val);
+        }
+    }
+    else {
+        /* Not something you can raise.  throw() fails. */
+        PyErr_Format(PyExc_TypeError,
+                     "exceptions must be classes or instances "
+                     "deriving from BaseException, not %s",
+                     Py_TYPE(typ)->tp_name);
+            goto failed_throw;
+    }
+
+    PyErr_Restore(typ, val, tb);
+    return 0;
+
+failed_throw:
+    /* Didn't use our arguments, so restore their original refcounts */
+    Py_DECREF(typ);
+    Py_XDECREF(val);
+    Py_XDECREF(tb);
+    return -1;
+}
+
+
 PyDoc_STRVAR(throw_doc,
 "throw(typ[,val[,tb]]) -> raise exception in generator,\n\
 return next yielded value or raise StopIteration.");
@@ -483,66 +542,37 @@ _gen_throw(PyGenObject *gen, int close_on_genexit,
     }
 
 throw_here:
-    /* First, check the traceback argument, replacing None with
-       NULL. */
-    if (tb == Py_None) {
-        tb = NULL;
-    }
-    else if (tb != NULL && !PyTraceBack_Check(tb)) {
-        PyErr_SetString(PyExc_TypeError,
-            "throw() third argument must be a traceback object");
-        return NULL;
-    }
-
-    Py_INCREF(typ);
-    Py_XINCREF(val);
-    Py_XINCREF(tb);
-
-    if (PyExceptionClass_Check(typ))
-        PyErr_NormalizeException(&typ, &val, &tb);
-
-    else if (PyExceptionInstance_Check(typ)) {
-        /* Raising an instance.  The value should be a dummy. */
-        if (val && val != Py_None) {
-            PyErr_SetString(PyExc_TypeError,
-              "instance exception may not have a separate value");
-            goto failed_throw;
+    {
+        int err = set_exception_from_values(typ, val, tb);
+        if (err < 0) {
+            return NULL;
         }
-        else {
-            /* Normalize to raise <class>, <instance> */
-            Py_XDECREF(val);
-            val = typ;
-            typ = PyExceptionInstance_Class(typ);
-            Py_INCREF(typ);
-
-            if (tb == NULL)
-                /* Returns NULL if there's no traceback */
-                tb = PyException_GetTraceback(val);
-        }
+        return gen_send_ex(gen, Py_None, 1, 0);
     }
-    else {
-        /* Not something you can raise.  throw() fails. */
-        PyErr_Format(PyExc_TypeError,
-                     "exceptions must be classes or instances "
-                     "deriving from BaseException, not %s",
-                     Py_TYPE(typ)->tp_name);
-            goto failed_throw;
-    }
-
-    PyErr_Restore(typ, val, tb);
-    return gen_send_ex(gen, Py_None, 1, 0);
-
-failed_throw:
-    /* Didn't use our arguments, so restore their original refcounts */
-    Py_DECREF(typ);
-    Py_XDECREF(val);
-    Py_XDECREF(tb);
-    return NULL;
 }
 
 
 static PyObject *
 gen_throw(PyGenObject *gen, PyObject *args)
+{
+    PyObject *typ;
+    PyObject *tb = NULL;
+    PyObject *val = NULL;
+
+    if (!PyArg_UnpackTuple(args, "throw", 1, 3, &typ, &val, &tb)) {
+        return NULL;
+    }
+
+    int err = set_exception_from_values(typ, val, tb);
+    if (err < 0) {
+        return NULL;
+    }
+    return gen_send_ex(gen, Py_None, 1, 0);
+}
+
+
+static PyObject *
+coro_throw(PyGenObject *gen, PyObject *args)
 {
     PyObject *typ;
     PyObject *tb = NULL;
@@ -981,7 +1011,7 @@ PyDoc_STRVAR(coro_close_doc,
 
 static PyMethodDef coro_methods[] = {
     {"send",(PyCFunction)_PyGen_Send, METH_O, coro_send_doc},
-    {"throw",(PyCFunction)gen_throw, METH_VARARGS, coro_throw_doc},
+    {"throw",(PyCFunction)coro_throw, METH_VARARGS, coro_throw_doc},
     {"close",(PyCFunction)gen_close, METH_NOARGS, coro_close_doc},
     {NULL, NULL}        /* Sentinel */
 };
@@ -1068,7 +1098,7 @@ coro_wrapper_send(PyCoroWrapper *cw, PyObject *arg)
 static PyObject *
 coro_wrapper_throw(PyCoroWrapper *cw, PyObject *args)
 {
-    return gen_throw((PyGenObject *)cw->cw_coroutine, args);
+    return coro_throw((PyGenObject *)cw->cw_coroutine, args);
 }
 
 static PyObject *
@@ -1629,7 +1659,7 @@ async_gen_asend_throw(PyAsyncGenASend *o, PyObject *args)
         return NULL;
     }
 
-    result = gen_throw((PyGenObject*)o->ags_gen, args);
+    result = coro_throw((PyGenObject*)o->ags_gen, args);
     result = async_gen_unwrap_value(o->ags_gen, result);
 
     if (result == NULL) {
@@ -1972,7 +2002,7 @@ async_gen_athrow_throw(PyAsyncGenAThrow *o, PyObject *args)
         return NULL;
     }
 
-    retval = gen_throw((PyGenObject*)o->agt_gen, args);
+    retval = coro_throw((PyGenObject*)o->agt_gen, args);
     if (o->agt_args) {
         return async_gen_unwrap_value(o->agt_gen, retval);
     } else {
