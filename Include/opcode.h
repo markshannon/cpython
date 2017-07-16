@@ -12,6 +12,8 @@ extern "C" {
 #define ROT_THREE                 3
 #define DUP_TOP                   4
 #define DUP_TOP_TWO               5
+#define ROT_FOUR                  6
+#define RETURN                    7
 #define NOP                       9
 #define UNARY_POSITIVE           10
 #define UNARY_NEGATIVE           11
@@ -29,6 +31,11 @@ extern "C" {
 #define BINARY_TRUE_DIVIDE       27
 #define INPLACE_FLOOR_DIVIDE     28
 #define INPLACE_TRUE_DIVIDE      29
+
+#define POP_EXCEPT_BLOCK         33
+#define POP_BLOCK_NO_UNWIND      34
+#define EXIT_WITH                35
+
 #define GET_AITER                50
 #define GET_ANEXT                51
 #define BEFORE_ASYNC_WITH        52
@@ -50,6 +57,7 @@ extern "C" {
 #define LOAD_BUILD_CLASS         71
 #define YIELD_FROM               72
 #define GET_AWAITABLE            73
+#define RERAISE                  74
 #define INPLACE_LSHIFT           75
 #define INPLACE_RSHIFT           76
 #define INPLACE_AND              77
@@ -92,10 +100,12 @@ extern "C" {
 #define POP_JUMP_IF_FALSE       114
 #define POP_JUMP_IF_TRUE        115
 #define LOAD_GLOBAL             116
+#define END_ITER                117
 #define CONTINUE_LOOP           119
 #define SETUP_LOOP              120
 #define SETUP_EXCEPT            121
 #define SETUP_FINALLY           122
+#define ENTER_WITH              123
 #define LOAD_FAST               124
 #define STORE_FAST              125
 #define DELETE_FAST             126
