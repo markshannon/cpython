@@ -297,6 +297,7 @@ _code_type = type(_write_atomic.__code__)
 #                         this might affected the first line number #32911)
 #     Python 3.8a1  3400 (move frame block handling to compiler #17611)
 #     Python 3.8a1  3401 (add END_ASYNC_FOR #33041)
+#     Python 3.8a1  3402 (more efficient bytecodes for f-strings #33092)
 #     Python 3.8a1  3410 (PEP570 Python Positional-Only Parameters #36540)
 #     Python 3.8b2  3411 (Reverse evaluation order of key: value in dict
 #                         comprehensions #35224)

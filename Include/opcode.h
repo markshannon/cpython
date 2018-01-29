@@ -30,6 +30,8 @@ extern "C" {
 #define BINARY_TRUE_DIVIDE       27
 #define INPLACE_FLOOR_DIVIDE     28
 #define INPLACE_TRUE_DIVIDE      29
+#define FORMAT_SIMPLE            40
+#define FORMAT_WITH_SPEC         41
 #define RERAISE                  48
 #define WITH_EXCEPT_START        49
 #define GET_AITER                50
@@ -118,7 +120,6 @@ extern "C" {
 #define MAP_ADD                 147
 #define LOAD_CLASSDEREF         148
 #define SETUP_ASYNC_WITH        154
-#define FORMAT_VALUE            155
 #define BUILD_CONST_KEY_MAP     156
 #define BUILD_STRING            157
 #define LOAD_METHOD             160
@@ -127,6 +128,7 @@ extern "C" {
 #define SET_UPDATE              163
 #define DICT_MERGE              164
 #define DICT_UPDATE             165
+#define CONVERT_VALUE           166
 #ifdef NEED_OPCODE_JUMP_TABLES
 static uint32_t _PyOpcode_RelativeJump[8] = {
     0U,

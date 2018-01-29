@@ -308,20 +308,22 @@ def _fstring(a, b, c, d):
 
 dis_fstring = """\
 %3d           0 LOAD_FAST                0 (a)
-              2 FORMAT_VALUE             0
+              2 FORMAT_SIMPLE
               4 LOAD_CONST               1 (' ')
               6 LOAD_FAST                1 (b)
               8 LOAD_CONST               2 ('4')
-             10 FORMAT_VALUE             4 (with format)
+             10 FORMAT_WITH_SPEC
              12 LOAD_CONST               1 (' ')
              14 LOAD_FAST                2 (c)
-             16 FORMAT_VALUE             2 (repr)
-             18 LOAD_CONST               1 (' ')
-             20 LOAD_FAST                3 (d)
-             22 LOAD_CONST               2 ('4')
-             24 FORMAT_VALUE             6 (repr, with format)
-             26 BUILD_STRING             7
-             28 RETURN_VALUE
+             16 CONVERT_VALUE            2 (repr)
+             18 FORMAT_SIMPLE
+             20 LOAD_CONST               1 (' ')
+             22 LOAD_FAST                3 (d)
+             24 CONVERT_VALUE            2 (repr)
+             26 LOAD_CONST               2 ('4')
+             28 FORMAT_WITH_SPEC
+             30 BUILD_STRING             7
+             32 RETURN_VALUE
 """ % (_fstring.__code__.co_firstlineno + 1,)
 
 def _tryfinally(a, b):

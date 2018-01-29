@@ -16,7 +16,7 @@ del _opcodes_all
 _have_code = (types.MethodType, types.FunctionType, types.CodeType,
               classmethod, staticmethod, type)
 
-FORMAT_VALUE = opmap['FORMAT_VALUE']
+CONVERT_VALUE = opmap['CONVERT_VALUE']
 FORMAT_VALUE_CONVERTERS = (
     (None, ''),
     (str, 'str'),
@@ -348,13 +348,9 @@ def _get_instructions_bytes(code, varnames=None, names=None, constants=None,
                 argrepr = argval
             elif op in hasfree:
                 argval, argrepr = _get_name_info(arg, cells)
-            elif op == FORMAT_VALUE:
-                argval, argrepr = FORMAT_VALUE_CONVERTERS[arg & 0x3]
-                argval = (argval, bool(arg & 0x4))
-                if argval[1]:
-                    if argrepr:
-                        argrepr += ', '
-                    argrepr += 'with format'
+            elif op == CONVERT_VALUE:
+                argval = (None, str, repr, ascii)[arg]
+                argrepr = ('', 'str', 'repr', 'ascii')[arg]
             elif op == MAKE_FUNCTION:
                 argrepr = ', '.join(s for i, s in enumerate(MAKE_FUNCTION_FLAGS)
                                     if arg & (1<<i))

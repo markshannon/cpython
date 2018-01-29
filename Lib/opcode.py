@@ -83,8 +83,12 @@ def_op('BINARY_TRUE_DIVIDE', 27)
 def_op('INPLACE_FLOOR_DIVIDE', 28)
 def_op('INPLACE_TRUE_DIVIDE', 29)
 
+def_op('FORMAT_SIMPLE', 40)
+def_op('FORMAT_WITH_SPEC', 41)
+
 def_op('RERAISE', 48)
 def_op('WITH_EXCEPT_START', 49)
+
 def_op('GET_AITER', 50)
 def_op('GET_ANEXT', 51)
 def_op('BEFORE_ASYNC_WITH', 52)
@@ -202,7 +206,7 @@ EXTENDED_ARG = 144
 
 jrel_op('SETUP_ASYNC_WITH', 154)
 
-def_op('FORMAT_VALUE', 155)
+
 def_op('BUILD_CONST_KEY_MAP', 156)
 def_op('BUILD_STRING', 157)
 
@@ -213,5 +217,7 @@ def_op('LIST_EXTEND', 162)
 def_op('SET_UPDATE', 163)
 def_op('DICT_MERGE', 164)
 def_op('DICT_UPDATE', 165)
+
+def_op('CONVERT_VALUE', 166)
 
 del def_op, name_op, jrel_op, jabs_op
