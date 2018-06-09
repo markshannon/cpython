@@ -146,7 +146,6 @@ _PyObject_FastCallKeywords(PyObject *callable, PyObject **stack, Py_ssize_t narg
     assert(!PyErr_Occurred());
 
     nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
-    assert(nargs >= 0);
     assert(kwnames == NULL || PyTuple_CheckExact(kwnames));
 
     /* kwnames must only contains str strings, no subclass, and all keys must
@@ -387,7 +386,7 @@ _PyFunction_FastCallDict(PyObject *func, PyObject *const *args, Py_ssize_t nargs
 }
 
 PyObject *
-_PyFunction_FastCallKeywords(PyObject *func, PyObject *const *stack,
+_PyFunction_FastCallKeywords(PyObject *func, PyObject **stack,
                              Py_ssize_t nargs, PyObject *kwnames)
 {
     PyCodeObject *co = (PyCodeObject *)PyFunction_GET_CODE(func);
@@ -402,6 +401,7 @@ _PyFunction_FastCallKeywords(PyObject *func, PyObject *const *stack,
     assert(nargs >= 0);
     assert(kwnames == NULL || PyTuple_CheckExact(kwnames));
     assert((nargs == 0 && nkwargs == 0) || stack != NULL);
+    nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
     /* kwnames must only contains str strings, no subclass, and all keys must
        be unique */
 

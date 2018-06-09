@@ -474,7 +474,7 @@ builtin_callable(PyObject *module, PyObject *obj)
 }
 
 static PyObject *
-builtin_breakpoint(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *keywords)
+builtin_breakpoint(PyObject *self, PyObject **args, Py_ssize_t nargs, PyObject *keywords)
 {
     PyObject *hook = PySys_GetObject("breakpointhook");
 
@@ -2234,7 +2234,7 @@ PyDoc_STRVAR(builtin_sorted__doc__,
     {"sorted", (PyCFunction)(void(*)(void))builtin_sorted, METH_FASTCALL | METH_KEYWORDS, builtin_sorted__doc__},
 
 static PyObject *
-builtin_sorted(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
+builtin_sorted(PyObject *self, PyObject **args, Py_ssize_t nargs, PyObject *kwnames)
 {
     PyObject *newlist, *v, *seq, *callable;
 

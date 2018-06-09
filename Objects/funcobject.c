@@ -36,6 +36,7 @@ PyFunction_NewWithQualName(PyObject *code, PyObject *globals, PyObject *qualname
     op->func_defaults = NULL; /* No default arguments */
     op->func_kwdefaults = NULL; /* No keyword only defaults */
     op->func_closure = NULL;
+    op->vector_call = _PyFunction_FastCallKeywords;
 
     consts = ((PyCodeObject *)code)->co_consts;
     if (PyTuple_Size(consts) >= 1) {
@@ -623,7 +624,8 @@ PyTypeObject PyFunction_Type = {
     0,                                          /* tp_getattro */
     0,                                          /* tp_setattro */
     0,                                          /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,    /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC |
+    Py_TPFLAGS_HAS_VECTORCALL,                  /* tp_flags */
     func_new__doc__,                            /* tp_doc */
     (traverseproc)func_traverse,                /* tp_traverse */
     (inquiry)func_clear,                        /* tp_clear */
@@ -642,6 +644,7 @@ PyTypeObject PyFunction_Type = {
     0,                                          /* tp_init */
     0,                                          /* tp_alloc */
     func_new,                                   /* tp_new */
+    .tp_vectorcall_offset = offsetof(PyFunctionObject, vector_call),
 };
 
 

@@ -618,7 +618,7 @@ _contextvars_Context_copy_impl(PyContext *self)
 
 
 static PyObject *
-context_run(PyContext *self, PyObject *const *args,
+context_run(PyContext *self, PyObject **args,
             Py_ssize_t nargs, PyObject *kwnames)
 {
     if (nargs < 1) {
