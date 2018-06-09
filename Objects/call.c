@@ -603,6 +603,7 @@ _PyMethodDef_RawFastCallKeywords(PyMethodDef *method, PyObject *self,
 
     assert(method != NULL);
     assert(nargs >= 0);
+    nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
     assert(kwnames == NULL || PyTuple_CheckExact(kwnames));
     /* kwnames must only contains str strings, no subclass, and all keys must
        be unique */
@@ -723,13 +724,14 @@ exit:
 
 PyObject *
 _PyCFunction_FastCallKeywords(PyObject *func,
-                              PyObject *const *args, Py_ssize_t nargs,
+                              PyObject **args, Py_ssize_t nargs,
                               PyObject *kwnames)
 {
     PyObject *result;
 
     assert(func != NULL);
     assert(PyCFunction_Check(func));
+    nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
 
     result = _PyMethodDef_RawFastCallKeywords(((PyCFunctionObject*)func)->m_ml,
                                               PyCFunction_GET_SELF(func),
