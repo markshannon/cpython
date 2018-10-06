@@ -91,7 +91,7 @@ PyAPI_FUNC(PyObject *) _PyObject_FastCallDict(
    error. */
 PyAPI_FUNC(PyObject *) _PyObject_FastCallKeywords(
     PyObject *callable,
-    PyObject *const *args,
+    PyObject **args,
     Py_ssize_t nargs,
     PyObject *kwnames);
 

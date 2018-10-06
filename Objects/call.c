@@ -3,6 +3,7 @@
 #include "pycore_pystate.h"
 #include "pycore_tupleobject.h"
 #include "frameobject.h"
+#include "vectorcall.h"
 
 
 int
@@ -136,7 +137,7 @@ _PyObject_FastCallDict(PyObject *callable, PyObject *const *args, Py_ssize_t nar
 
 
 PyObject *
-_PyObject_FastCallKeywords(PyObject *callable, PyObject *const *stack, Py_ssize_t nargs,
+_PyObject_FastCallKeywords(PyObject *callable, PyObject **stack, Py_ssize_t nargs,
                            PyObject *kwnames)
 {
     /* _PyObject_FastCallKeywords() must not be called with an exception set,
@@ -144,6 +145,7 @@ _PyObject_FastCallKeywords(PyObject *callable, PyObject *const *stack, Py_ssize_
        caller loses its exception */
     assert(!PyErr_Occurred());
 
+    nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
     assert(nargs >= 0);
     assert(kwnames == NULL || PyTuple_CheckExact(kwnames));
 
