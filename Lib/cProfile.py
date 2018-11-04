@@ -8,6 +8,7 @@ __all__ = ["run", "runctx", "Profile"]
 
 import _lsprof
 import profile as _pyprofile
+import types
 
 # ____________________________________________________________
 # Simple interface
@@ -119,11 +120,22 @@ class Profile(_lsprof.Profiler):
 
 # ____________________________________________________________
 
+CODE_OBJECT_TYPE = type(run.__code__)
+
 def label(code):
-    if isinstance(code, str):
-        return ('~', 0, code)    # built-in functions ('~' sorts at the end)
-    else:
+    if isinstance(code, types.CodeType):
         return (code.co_filename, code.co_firstlineno, code.co_name)
+    elif isinstance(code, str):
+        return ('~', 0, code)
+    elif isinstance(code, types.MethodDescriptorType):
+        return ('~', 0, f"{{method '{code.__name__}' of '{code.__objclass__.__name__}' objects}}")
+    elif isinstance(code, types.BuiltinFunctionType):
+        if hasattr(code.__module__, "__name__"):
+            return ('~', 0, f"{{built-in method {code.__module__.__name__}.{code.__name__}}}")
+        else:
+            return ('~', 0, f"{{built-in method {code.__name__}}}")
+    else:
+        return ('~', 0, str(code))    # other
 
 # ____________________________________________________________
 

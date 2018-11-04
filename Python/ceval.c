@@ -4571,29 +4571,7 @@ call_function(PyObject ***pp_stack, Py_ssize_t oparg, PyObject *kwnames)
     }
     else if (Py_TYPE(func) == &PyMethodDescr_Type) {
         PyThreadState *tstate = _PyThreadState_GET();
-        if (nargs > 0 && tstate->use_tracing) {
-            /* We need to create a temporary bound method as argument
-               for profiling.
-
-               If nargs == 0, then this cannot work because we have no
-               "self". In any case, the call itself would raise
-               TypeError (foo needs an argument), so we just skip
-               profiling. */
-            PyObject *self = stack[0];
-            func = Py_TYPE(func)->tp_descr_get(func, self, (PyObject*)Py_TYPE(self));
-            if (func != NULL) {
-                C_TRACE(x, _PyCFunction_FastCallKeywords(func,
-                                                         stack+1, nargs-1,
-                                                         kwnames));
-                Py_DECREF(func);
-            }
-            else {
-                x = NULL;
-            }
-        }
-        else {
-            x = _PyMethodDescr_FastCallKeywords(func, stack, nargs, kwnames);
-        }
+        C_TRACE(x, _PyMethodDescr_FastCallKeywords(func, stack, nargs, kwnames));
     }
     else {
         if (PyMethod_Check(func) && PyMethod_GET_SELF(func) != NULL) {

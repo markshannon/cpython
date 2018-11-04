@@ -160,66 +160,37 @@ normalizeUserObj(PyObject *obj)
         Py_INCREF(obj);
         return obj;
     }
-    /* Replace built-in function objects with a descriptive string
-       because of built-in methods -- keeping a reference to
-       __self__ is probably not a good idea. */
     fn = (PyCFunctionObject *)obj;
-
-    if (fn->m_self == NULL) {
-        /* built-in function: look up the module name */
-        PyObject *mod = fn->m_module;
-        PyObject *modname = NULL;
-        if (mod != NULL) {
-            if (PyUnicode_Check(mod)) {
-                modname = mod;
-                Py_INCREF(modname);
-            }
-            else if (PyModule_Check(mod)) {
-                modname = PyModule_GetNameObject(mod);
-                if (modname == NULL)
-                    PyErr_Clear();
-            }
-        }
-        if (modname != NULL) {
-            if (!_PyUnicode_EqualToASCIIString(modname, "builtins")) {
-                PyObject *result;
-                result = PyUnicode_FromFormat("<%U.%s>", modname,
-                                              fn->m_ml->ml_name);
-                Py_DECREF(modname);
-                return result;
-            }
-            Py_DECREF(modname);
-        }
-        return PyUnicode_FromFormat("<%s>", fn->m_ml->ml_name);
+    PyObject *self = fn->m_self;
+    
+    if (self == NULL) {
+        /* Built-in function (not method) */
+        Py_INCREF(obj);
+        return obj;
     }
-    else {
-        /* built-in method: try to return
-            repr(getattr(type(__self__), __name__))
-        */
-        PyObject *self = fn->m_self;
-        PyObject *name = PyUnicode_FromString(fn->m_ml->ml_name);
-        PyObject *modname = fn->m_module;
+    
+    /* Replace built-in method objects with method-descriptor --
+       keeping a reference to __self__ is probably not a good idea. */
 
-        if (name != NULL) {
-            PyObject *mo = _PyType_Lookup(Py_TYPE(self), name);
-            Py_XINCREF(mo);
-            Py_DECREF(name);
-            if (mo != NULL) {
-                PyObject *res = PyObject_Repr(mo);
-                Py_DECREF(mo);
-                if (res != NULL)
-                    return res;
-            }
+    PyObject *name = PyUnicode_FromString(fn->m_ml->ml_name);
+    if (name != NULL) {
+        PyObject *mo = _PyType_Lookup(Py_TYPE(self), name);
+        Py_XINCREF(mo);
+        Py_DECREF(name);
+        if (mo != NULL) {
+            return mo;
         }
-        /* Otherwise, use __module__ */
-        PyErr_Clear();
-        if (modname != NULL && PyUnicode_Check(modname))
-            return PyUnicode_FromFormat("<built-in method %S.%s>",
-                                        modname,  fn->m_ml->ml_name);
-        else
-            return PyUnicode_FromFormat("<built-in method %s>",
-                                        fn->m_ml->ml_name);
     }
+
+    /* Otherwise, use __module__ */
+    PyObject *modname = fn->m_module;
+    PyErr_Clear();
+    if (modname != NULL && PyUnicode_Check(modname))
+        return PyUnicode_FromFormat("<built-in method %S.%s>",
+                                    modname,  fn->m_ml->ml_name);
+    else
+        return PyUnicode_FromFormat("<built-in method %s>",
+                                    fn->m_ml->ml_name);
 }
 
 static ProfilerEntry*
@@ -457,11 +428,17 @@ profiler_callback(PyObject *self, PyFrameObject *frame, int what,
     /* the Python function 'frame' is issuing a call to the built-in
        function 'arg' */
     case PyTrace_C_CALL:
-        if ((((ProfilerObject *)self)->flags & POF_BUILTINS)
-            && PyCFunction_Check(arg)) {
-            ptrace_enter_call(self,
-                              ((PyCFunctionObject *)arg)->m_ml,
-                              arg);
+        if (((ProfilerObject *)self)->flags & POF_BUILTINS) {
+            if (PyCFunction_Check(arg)) {
+                ptrace_enter_call(self,
+                                  ((PyCFunctionObject *)arg)->m_ml,
+                                  arg);
+            }
+            else if (Py_TYPE(arg) == &PyMethodDescr_Type) {
+                ptrace_enter_call(self,
+                                  ((PyMethodDescrObject *)arg)->d_method,
+                                  arg);
+            }
         }
         break;
 
@@ -469,10 +446,15 @@ profiler_callback(PyObject *self, PyFrameObject *frame, int what,
        caller 'frame' */
     case PyTrace_C_RETURN:              /* ...normally */
     case PyTrace_C_EXCEPTION:           /* ...with an exception set */
-        if ((((ProfilerObject *)self)->flags & POF_BUILTINS)
-            && PyCFunction_Check(arg)) {
-            ptrace_leave_call(self,
-                              ((PyCFunctionObject *)arg)->m_ml);
+        if (((ProfilerObject *)self)->flags & POF_BUILTINS) {
+            if (PyCFunction_Check(arg)) {
+                ptrace_leave_call(self,
+                                  ((PyCFunctionObject *)arg)->m_ml);
+            }
+            else if (Py_TYPE(arg) == &PyMethodDescr_Type) {
+                ptrace_leave_call(self,
+                                  ((PyMethodDescrObject *)arg)->d_method);
+            }
         }
         break;
 
