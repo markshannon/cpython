@@ -969,7 +969,7 @@ class SizeofTest(unittest.TestCase):
         # complex
         check(complex(0,1), size('2d'))
         # method_descriptor (descriptor object)
-        check(str.lower, size('3PP'))
+        check(str.lower, size('3PPP'))
         # classmethod_descriptor (descriptor object)
         # XXX
         # member_descriptor (descriptor object)
