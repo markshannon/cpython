@@ -95,6 +95,16 @@ PyAPI_FUNC(PyObject *) PyObject_VectorCallWithCallable(
     Py_ssize_t nargs,
     PyObject *kwnames);
 
+PyObject *
+PyObject_VectorCallWithCallable(
+    PyObject *callable,
+    PyObject **stack,
+    Py_ssize_t nargs,
+    PyObject *kwnames);
+
+PyObject *
+PyCall_MakeTpCall(PyObject *callable, PyObject *const *stack, Py_ssize_t nargs, PyObject *kwnames);
+
 #define _PyObject_FastCall(func, args, nargs) \
     _PyObject_FastCallDict((func), (args), (nargs), NULL)
 

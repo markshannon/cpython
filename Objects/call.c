@@ -144,71 +144,68 @@ PyObject_VectorCallWithCallable(PyObject *callable, PyObject **stack, Py_ssize_t
        because it can clear it (directly or indirectly) and so the
        caller loses its exception */
     assert(!PyErr_Occurred());
-
-    nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
     assert(kwnames == NULL || PyTuple_CheckExact(kwnames));
 
     /* kwnames must only contains str strings, no subclass, and all keys must
        be unique: these checks are implemented in Python/ceval.c and
        _PyArg_ParseStackAndKeywords(). */
 
-    if (PyFunction_Check(callable)) {
-        return _PyFunction_FastCallKeywords(callable, stack, nargs, kwnames);
+    return _Py_VectorCall(callable, stack, nargs, kwnames);
+}
+
+PyObject *
+PyCall_MakeTpCall(PyObject *callable, PyObject *const *stack, Py_ssize_t nargs, PyObject *kwnames) {
+    /* Slow-path: build a temporary tuple for positional arguments and a
+        temporary dictionary for keyword arguments (if any) */
+
+    ternaryfunc call;
+    PyObject *argstuple;
+    PyObject *kwdict, *result;
+    Py_ssize_t nkwargs;
+
+    nkwargs = (kwnames == NULL) ? 0 : PyTuple_GET_SIZE(kwnames);
+
+    nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
+    assert((nargs == 0 && nkwargs == 0) || stack != NULL);
+
+    call = callable->ob_type->tp_call;
+    if (call == NULL) {
+        PyErr_Format(PyExc_TypeError, "'%.200s' object is not callable",
+                        callable->ob_type->tp_name);
+        return NULL;
     }
-    if (PyCFunction_Check(callable)) {
-        return _PyCFunction_FastCallKeywords(callable, stack, nargs, kwnames);
+
+    argstuple = _PyTuple_FromArray(stack, nargs);
+    if (argstuple == NULL) {
+        return NULL;
+    }
+
+    if (nkwargs > 0) {
+        kwdict = _PyStack_AsDict(stack + nargs, kwnames);
+        if (kwdict == NULL) {
+            Py_DECREF(argstuple);
+            return NULL;
+        }
     }
     else {
-        /* Slow-path: build a temporary tuple for positional arguments and a
-           temporary dictionary for keyword arguments (if any) */
+        kwdict = NULL;
+    }
 
-        ternaryfunc call;
-        PyObject *argstuple;
-        PyObject *kwdict, *result;
-        Py_ssize_t nkwargs;
-
-        nkwargs = (kwnames == NULL) ? 0 : PyTuple_GET_SIZE(kwnames);
-        assert((nargs == 0 && nkwargs == 0) || stack != NULL);
-
-        call = callable->ob_type->tp_call;
-        if (call == NULL) {
-            PyErr_Format(PyExc_TypeError, "'%.200s' object is not callable",
-                         callable->ob_type->tp_name);
-            return NULL;
-        }
-
-        argstuple = _PyTuple_FromArray(stack, nargs);
-        if (argstuple == NULL) {
-            return NULL;
-        }
-
-        if (nkwargs > 0) {
-            kwdict = _PyStack_AsDict(stack + nargs, kwnames);
-            if (kwdict == NULL) {
-                Py_DECREF(argstuple);
-                return NULL;
-            }
-        }
-        else {
-            kwdict = NULL;
-        }
-
-        if (Py_EnterRecursiveCall(" while calling a Python object")) {
-            Py_DECREF(argstuple);
-            Py_XDECREF(kwdict);
-            return NULL;
-        }
-
-        result = (*call)(callable, argstuple, kwdict);
-
-        Py_LeaveRecursiveCall();
-
+    if (Py_EnterRecursiveCall(" while calling a Python object")) {
         Py_DECREF(argstuple);
         Py_XDECREF(kwdict);
-
-        result = _Py_CheckFunctionResult(callable, result, NULL);
-        return result;
+        return NULL;
     }
+
+    result = (*call)(callable, argstuple, kwdict);
+
+    Py_LeaveRecursiveCall();
+
+    Py_DECREF(argstuple);
+    Py_XDECREF(kwdict);
+
+    result = _Py_CheckFunctionResult(callable, result, NULL);
+    return result;
 }
 
 PyObject *
