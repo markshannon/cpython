@@ -211,6 +211,12 @@ PyObject_VectorCallWithCallable(PyObject *callable, PyObject **stack, Py_ssize_t
     }
 }
 
+PyObject *
+PyObject_VectorCall(PyObject **stack, Py_ssize_t nargs,
+                           PyObject *kwnames)
+{
+    return PyObject_VectorCallWithCallable(stack[0], &stack[1], (nargs-1)|PY_VECTORCALL_ARGUMENTS_OFFSET, kwnames);
+}
 
 PyObject *
 PyObject_Call(PyObject *callable, PyObject *args, PyObject *kwargs)

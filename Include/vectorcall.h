@@ -11,6 +11,10 @@ extern "C" {
 #define PY_VECTORCALL_ARGUMENTS_OFFSET INTPTR_MIN
 
 PyObject *
+PyObject_VectorCall(PyObject **stack, Py_ssize_t nargs,
+                 PyObject *kwnames);
+
+PyObject *
 PyObject_VectorCallWithCallable(PyObject *callable, PyObject **stack, Py_ssize_t nargs,
                  PyObject *kwnames);
 
