@@ -10,6 +10,10 @@ extern "C" {
 
 #define PY_VECTORCALL_ARGUMENTS_OFFSET INTPTR_MIN
 
+PyObject *
+PyObject_VectorCallWithCallable(PyObject *callable, PyObject **stack, Py_ssize_t nargs,
+                 PyObject *kwnames);
+
 #ifndef Py_LIMITED_API
 static inline PyObject *
 _Py_VectorCall(
@@ -24,7 +28,7 @@ _Py_VectorCall(
             return (func)(callable, stack, nargs, kwnames);
         }
     }
-    return _PyObject_FastCallKeywords(callable, stack, nargs, kwnames);
+    return PyObject_VectorCallWithCallable(callable, stack, nargs, kwnames);
 }
 #endif
 

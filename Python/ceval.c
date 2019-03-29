@@ -4722,7 +4722,7 @@ call_function(PyObject ***pp_stack, Py_ssize_t oparg, PyObject *kwnames)
             x = _PyFunction_FastCallKeywords(func, stack, nargs, kwnames);
         }
         else {
-            x = _PyObject_FastCallKeywords(func, stack, nargs, kwnames);
+            x = PyObject_VectorCallWithCallable(func, stack, nargs, kwnames);
         }
         Py_DECREF(func);
     }

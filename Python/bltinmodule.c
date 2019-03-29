@@ -483,7 +483,7 @@ builtin_breakpoint(PyObject *self, PyObject **args, Py_ssize_t nargs, PyObject *
         return NULL;
     }
     Py_INCREF(hook);
-    PyObject *retval = _PyObject_FastCallKeywords(hook, args, nargs, keywords);
+    PyObject *retval = PyObject_VectorCallWithCallable(hook, args, nargs, keywords);
     Py_DECREF(hook);
     return retval;
 }
@@ -2254,7 +2254,7 @@ builtin_sorted(PyObject *self, PyObject **args, Py_ssize_t nargs, PyObject *kwna
     }
 
     assert(nargs >= 1);
-    v = _PyObject_FastCallKeywords(callable, args + 1, nargs - 1, kwnames);
+    v = PyObject_VectorCallWithCallable(callable, args + 1, nargs - 1, kwnames);
     Py_DECREF(callable);
     if (v == NULL) {
         Py_DECREF(newlist);

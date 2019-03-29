@@ -137,10 +137,10 @@ _PyObject_FastCallDict(PyObject *callable, PyObject *const *args, Py_ssize_t nar
 
 
 PyObject *
-_PyObject_FastCallKeywords(PyObject *callable, PyObject **stack, Py_ssize_t nargs,
+PyObject_VectorCallWithCallable(PyObject *callable, PyObject **stack, Py_ssize_t nargs,
                            PyObject *kwnames)
 {
-    /* _PyObject_FastCallKeywords() must not be called with an exception set,
+    /* PyObject_VectorCallWithCallable() must not be called with an exception set,
        because it can clear it (directly or indirectly) and so the
        caller loses its exception */
     assert(!PyErr_Occurred());
