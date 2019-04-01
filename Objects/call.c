@@ -216,6 +216,37 @@ PyObject_VectorCall(PyObject **stack, Py_ssize_t nargs,
 }
 
 PyObject *
+PyCall_MakeVectorCall(PyObject *callable, PyObject *tuple, PyObject *kwargs) {
+    PyTypeObject *tp = Py_TYPE(callable);
+    vectorcall_func func = NULL;
+    if (PyType_HasFeature(tp, Py_TPFLAGS_HAS_VECTORCALL)) {
+        uintptr_t offset = tp->tp_vectorcall_offset;
+        func = *(vectorcall_func *)(((char *)callable) + offset);
+    }
+    if (func == NULL) {
+        PyErr_Format(PyExc_TypeError, "'%.200s' object is not callable",
+                        callable->ob_type->tp_name);
+        return NULL;
+    }
+    PyObject * const*stack;
+    Py_ssize_t nargs = PyTuple_GET_SIZE(tuple);
+    PyObject *kwnames, *result;
+    if (_PyStack_UnpackDict(&PyTuple_GET_ITEM(tuple, 0), nargs,
+        kwargs, &stack, &kwnames) < 0) {
+        return NULL;
+    }
+    /* It's OK to discard the `const` qualifier as PY_VECTORCALL_ARGUMENTS_OFFSET is not
+     * set, so the stack will not be modified. */
+    result = (*func) (callable, (PyObject **)stack, nargs, kwnames);
+    if (stack != &PyTuple_GET_ITEM(tuple, 0)) {
+        PyMem_Free((PyObject **)stack);
+    }
+
+    return result;
+
+}
+
+PyObject *
 PyObject_Call(PyObject *callable, PyObject *args, PyObject *kwargs)
 {
     ternaryfunc call;

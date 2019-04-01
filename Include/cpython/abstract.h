@@ -102,6 +102,8 @@ PyObject_VectorCallWithCallable(
     Py_ssize_t nargs,
     PyObject *kwnames);
 
+PyObject* PyCall_MakeVectorCall(PyObject* callable, PyObject* tuple, PyObject* dict);
+
 PyObject *
 PyCall_MakeTpCall(PyObject *callable, PyObject *const *stack, Py_ssize_t nargs, PyObject *kwnames);
 
