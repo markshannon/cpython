@@ -432,10 +432,10 @@ _PyFunction_FastCallKeywords(PyObject *func, PyObject **stack,
     Py_ssize_t nd;
 
     assert(PyFunction_Check(func));
+    nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
     assert(nargs >= 0);
     assert(kwnames == NULL || PyTuple_CheckExact(kwnames));
     assert((nargs == 0 && nkwargs == 0) || stack != NULL);
-    nargs &= ~PY_VECTORCALL_ARGUMENTS_OFFSET;
     /* kwnames must only contains str strings, no subclass, and all keys must
        be unique */
 
