@@ -343,7 +343,7 @@ given type object has a specified feature.
 #define Py_TPFLAGS_HAVE_FINALIZE (1UL << 0)
 
 /* Type structure has tp_vectorcall_offset member (3.8) */
-#define Py_TPFLAGS_HAS_VECTORCALL (1UL << 1)
+#define Py_TPFLAGS_HAVE_VECTORCALL (1UL << 1)
 
 #ifdef Py_LIMITED_API
 #  define PyType_HasFeature(t,f)  ((PyType_GetFlags(t) & (f)) != 0)

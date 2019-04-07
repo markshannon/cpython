@@ -17,7 +17,7 @@ _Py_VectorCall(
     Py_ssize_t nargs, PyObject *kwnames
 ) {
     PyTypeObject *tp = Py_TYPE(callable);
-    if (PyType_HasFeature(tp, Py_TPFLAGS_HAS_VECTORCALL)) {
+    if (PyType_HasFeature(tp, Py_TPFLAGS_HAVE_VECTORCALL)) {
         uintptr_t offset = tp->tp_vectorcall_offset;
         vectorcall_func func = *(vectorcall_func *)(((char *)callable) + offset);
         if (func) {
