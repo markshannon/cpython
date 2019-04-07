@@ -56,7 +56,7 @@ typedef int (*getbufferproc)(PyObject *, Py_buffer *, int);
 typedef void (*releasebufferproc)(PyObject *, Py_buffer *);
 
 typedef PyObject *(*vectorcall_func)
-    (PyObject *callable, PyObject **stack,
+    (PyObject *callable, PyObject *const *stack,
      Py_ssize_t nargs, PyObject *kwnames);
 
 /* Maximum number of dimensions */

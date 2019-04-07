@@ -42,7 +42,7 @@ PyMethod_Self(PyObject *im)
 
 /* Vector call for bound-methods */
 static PyObject *
-method_vector_call(PyObject *method, PyObject **stack,
+method_vector_call(PyObject *method, PyObject *const *stack,
                 Py_ssize_t nargs, PyObject *kwnames)
 {
     assert(Py_TYPE(method) == &PyMethod_Type);
@@ -52,11 +52,12 @@ method_vector_call(PyObject *method, PyObject **stack,
     
     if (nargs & PY_VECTORCALL_ARGUMENTS_OFFSET) {
         nargs = (nargs&~PY_VECTORCALL_ARGUMENTS_OFFSET)+1;
-        stack--;
-        PyObject *tmp = stack[0];
-        stack[0] = self;
-        result = _Py_VectorCall(func, stack, nargs, kwnames);
-        stack[0] = tmp;
+        /* PY_VECTORCALL_ARGUMENTS_OFFSET is set, so we are allowed to mutate the vector */
+        PyObject **args = (PyObject**)stack-1;
+        PyObject *tmp = args[0];
+        args[0] = self;
+        result = _Py_VectorCall(func, args, nargs, kwnames);
+        args[0] = tmp;
     }
     else {
         Py_ssize_t nkwargs = (kwnames == NULL) ? 0 : PyTuple_GET_SIZE(kwnames);

@@ -420,7 +420,7 @@ _PyFunction_FastCallDict(PyObject *func, PyObject *const *args, Py_ssize_t nargs
 }
 
 PyObject *
-_PyFunction_FastCallKeywords(PyObject *func, PyObject **stack,
+_PyFunction_FastCallKeywords(PyObject *func, PyObject* const* stack,
                              Py_ssize_t nargs, PyObject *kwnames)
 {
     PyCodeObject *co = (PyCodeObject *)PyFunction_GET_CODE(func);
@@ -758,7 +758,7 @@ exit:
 
 PyObject *
 _PyCFunction_FastCallKeywords(PyObject *func,
-                              PyObject **args, Py_ssize_t nargs,
+                              PyObject *const *args, Py_ssize_t nargs,
                               PyObject *kwnames)
 {
     PyObject *result;

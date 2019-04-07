@@ -69,7 +69,7 @@ PyAPI_FUNC(PyObject *) _PyFunction_FastCallDict(
 
 PyAPI_FUNC(PyObject *) _PyFunction_FastCallKeywords(
     PyObject *func,
-    PyObject **stack,
+    PyObject *const *stack,
     Py_ssize_t nargs,
     PyObject *kwnames);
 #endif
