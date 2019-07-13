@@ -49,7 +49,7 @@ method_vectorcall(PyObject *method, PyObject *const *args,
     PyObject *self, *func, *result;
     self = PyMethod_GET_SELF(method);
     func = PyMethod_GET_FUNCTION(method);
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
 
     if (nargsf & PY_VECTORCALL_ARGUMENTS_OFFSET) {
         /* PY_VECTORCALL_ARGUMENTS_OFFSET is set, so we are allowed to mutate the vector */

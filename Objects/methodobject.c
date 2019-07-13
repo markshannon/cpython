@@ -412,7 +412,7 @@ cfunction_vectorcall_FASTCALL(
     if (cfunction_check_kwargs(func, kwnames)) {
         return NULL;
     }
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     _PyCFunctionFast meth = (_PyCFunctionFast)
                             cfunction_enter_call(func);
     if (meth == NULL) {
@@ -427,7 +427,7 @@ static PyObject *
 cfunction_vectorcall_FASTCALL_KEYWORDS(
     PyObject *func, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     _PyCFunctionFastWithKeywords meth = (_PyCFunctionFastWithKeywords)
                                         cfunction_enter_call(func);
     if (meth == NULL) {
@@ -445,7 +445,7 @@ cfunction_vectorcall_NOARGS(
     if (cfunction_check_kwargs(func, kwnames)) {
         return NULL;
     }
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     if (nargs != 0) {
         PyErr_Format(PyExc_TypeError,
             "%.200s() takes no arguments (%zd given)", get_name(func), nargs);
@@ -467,7 +467,7 @@ cfunction_vectorcall_O(
     if (cfunction_check_kwargs(func, kwnames)) {
         return NULL;
     }
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     if (nargs != 1) {
         PyErr_Format(PyExc_TypeError,
             "%.200s() takes exactly one argument (%zd given)",

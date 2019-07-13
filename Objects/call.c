@@ -96,7 +96,7 @@ _PyObject_FastCallDict(PyObject *callable, PyObject *const *args,
     assert(!PyErr_Occurred());
     assert(callable != NULL);
 
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     assert(nargs >= 0);
     assert(nargs == 0 || args != NULL);
     assert(kwargs == NULL || PyDict_Check(kwargs));
@@ -318,7 +318,7 @@ _PyFunction_Vectorcall(PyObject *func, PyObject* const* stack,
     Py_ssize_t nd;
 
     assert(PyFunction_Check(func));
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     assert(nargs >= 0);
     assert(kwnames == NULL || PyTuple_CheckExact(kwnames));
     assert((nargs == 0 && nkwargs == 0) || stack != NULL);

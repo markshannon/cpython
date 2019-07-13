@@ -284,7 +284,7 @@ static PyObject *
 method_vectorcall_VARARGS(
     PyObject *func, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     if (method_check_args(func, args, nargs, kwnames)) {
         return NULL;
     }
@@ -307,7 +307,7 @@ static PyObject *
 method_vectorcall_VARARGS_KEYWORDS(
     PyObject *func, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     if (method_check_args(func, args, nargs, NULL)) {
         return NULL;
     }
@@ -341,7 +341,7 @@ static PyObject *
 method_vectorcall_FASTCALL(
     PyObject *func, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     if (method_check_args(func, args, nargs, kwnames)) {
         return NULL;
     }
@@ -359,7 +359,7 @@ static PyObject *
 method_vectorcall_FASTCALL_KEYWORDS(
     PyObject *func, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     if (method_check_args(func, args, nargs, NULL)) {
         return NULL;
     }
@@ -377,7 +377,7 @@ static PyObject *
 method_vectorcall_NOARGS(
     PyObject *func, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     if (method_check_args(func, args, nargs, kwnames)) {
         return NULL;
     }
@@ -399,7 +399,7 @@ static PyObject *
 method_vectorcall_O(
     PyObject *func, PyObject *const *args, size_t nargsf, PyObject *kwnames)
 {
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+    size_t nargs = PyVectorcall_NARGS(nargsf);
     if (method_check_args(func, args, nargs, kwnames)) {
         return NULL;
     }

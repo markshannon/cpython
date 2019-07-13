@@ -53,7 +53,7 @@ PyAPI_FUNC(PyObject *) _PyObject_MakeTpCall(
 
 #define PY_VECTORCALL_ARGUMENTS_OFFSET ((size_t)1 << (8 * sizeof(size_t) - 1))
 
-static inline Py_ssize_t
+static inline size_t
 PyVectorcall_NARGS(size_t n)
 {
     return n & ~PY_VECTORCALL_ARGUMENTS_OFFSET;
@@ -101,7 +101,7 @@ _PyObject_Vectorcall(PyObject *callable, PyObject *const *args,
     assert(args != NULL || PyVectorcall_NARGS(nargsf) == 0);
     vectorcallfunc func = _PyVectorcall_Function(callable);
     if (func == NULL) {
-        Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
+        size_t nargs = PyVectorcall_NARGS(nargsf);
         return _PyObject_MakeTpCall(callable, args, nargs, kwnames);
     }
     PyObject *res = func(callable, args, nargsf, kwnames);
