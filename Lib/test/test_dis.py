@@ -145,30 +145,24 @@ def bug1333982(x=[]):
     pass
 
 dis_bug1333982 = """\
-%3d           0 LOAD_CONST               1 (0)
-              2 POP_JUMP_IF_TRUE        26
-              4 LOAD_ASSERTION_ERROR
-              6 LOAD_CONST               2 (<code object <listcomp> at 0x..., file "%s", line %d>)
-              8 LOAD_CONST               3 ('bug1333982.<locals>.<listcomp>')
-             10 MAKE_FUNCTION            0
-             12 LOAD_FAST                0 (x)
-             14 GET_ITER
-             16 CALL_FUNCTION            1
+%3d           0 LOAD_ASSERTION_ERROR
+              2 LOAD_CONST               2 (<code object <listcomp> at 0x..., file "%s", line %d>)
+              4 LOAD_CONST               3 ('bug1333982.<locals>.<listcomp>')
+              6 MAKE_FUNCTION            0
+              8 LOAD_FAST                0 (x)
+             10 GET_ITER
+             12 CALL_FUNCTION            1
 
-%3d          18 LOAD_CONST               4 (1)
+%3d          14 LOAD_CONST               4 (1)
 
-%3d          20 BINARY_ADD
-             22 CALL_FUNCTION            1
-             24 RAISE_VARARGS            1
-
-%3d     >>   26 LOAD_CONST               0 (None)
-             28 RETURN_VALUE
+%3d          16 BINARY_ADD
+             18 CALL_FUNCTION            1
+             20 RAISE_VARARGS            1
 """ % (bug1333982.__code__.co_firstlineno + 1,
        __file__,
        bug1333982.__code__.co_firstlineno + 1,
        bug1333982.__code__.co_firstlineno + 2,
-       bug1333982.__code__.co_firstlineno + 1,
-       bug1333982.__code__.co_firstlineno + 3)
+       bug1333982.__code__.co_firstlineno + 1)
 
 _BIG_LINENO_FORMAT = """\
 %3d           0 LOAD_GLOBAL              0 (spam)
@@ -266,8 +260,6 @@ dis_compound_stmt_str = """\
               8 INPLACE_ADD
              10 STORE_NAME               0 (x)
              12 JUMP_ABSOLUTE            4
-             14 LOAD_CONST               2 (None)
-             16 RETURN_VALUE
 """
 
 dis_traceback = """\
@@ -416,9 +408,9 @@ dis_nested_0 = """\
               4 LOAD_CONST               1 (<code object foo at 0x..., file "%s", line %d>)
               6 LOAD_CONST               2 ('_h.<locals>.foo')
               8 MAKE_FUNCTION            8 (closure)
-             10 STORE_FAST               1 (foo)
+             10 DUP_TOP
 
-%3d          12 LOAD_FAST                1 (foo)
+%3d          12 STORE_FAST               1 (foo)
              14 RETURN_VALUE
 """ % (_h.__code__.co_firstlineno + 1,
        __file__,
@@ -555,7 +547,7 @@ class DisTests(unittest.TestCase):
     def test_big_offsets(self):
         def func(count):
             namespace = {}
-            func = "def foo(x):\n " + ";".join(["x = x + 1"] * count) + "\n return x"
+            func = "def foo(x):\n " + ";".join(["x = x + 1"] * (count+1) + "\n return x"
             exec(func, namespace)
             return namespace['foo']
 
