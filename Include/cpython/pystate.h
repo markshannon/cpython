@@ -7,6 +7,7 @@ extern "C" {
 #endif
 
 #include "cpython/initconfig.h"
+#include "internal/pycore_stacks.h"
 
 PyAPI_FUNC(int) _PyInterpreterState_RequiresIDRef(PyInterpreterState *);
 PyAPI_FUNC(void) _PyInterpreterState_RequireIDRef(PyInterpreterState *, int);
@@ -78,6 +79,7 @@ struct _ts {
     PyObject *curexc_type;
     PyObject *curexc_value;
     PyObject *curexc_traceback;
+    PyDataStack datastack;
 
     /* The exception currently being handled, if no coroutines/generators
      * are present. Always last element on the stack referred to be exc_info.

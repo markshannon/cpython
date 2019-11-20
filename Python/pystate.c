@@ -586,6 +586,7 @@ new_threadstate(PyInterpreterState *interp, int init)
     tstate->exc_state.exc_traceback = NULL;
     tstate->exc_state.previous_item = NULL;
     tstate->exc_info = &tstate->exc_state;
+    init_datastack(&tstate->datastack);
 
     tstate->c_profilefunc = NULL;
     tstate->c_tracefunc = NULL;

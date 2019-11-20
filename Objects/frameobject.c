@@ -135,11 +135,11 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
     }
 
     /* Forbid jumps upon a 'return' trace event (except after executing a
-     * YIELD_VALUE or YIELD_FROM opcode, f_stacktop is not NULL in that case)
+     * YIELD_VALUE or YIELD_FROM opcode, f_completed is not set in that case)
      * and upon an 'exception' trace event.
      * Jumps from 'call' trace events have already been forbidden above for new
      * frames, so this check does not change anything for 'call' events. */
-    if (f->f_stacktop == NULL) {
+    if (f->f_completed) {
         PyErr_SetString(PyExc_ValueError,
                 "can only jump from a 'line' trace event");
         return -1;
@@ -311,7 +311,7 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
     if (delta_iblock > 0) {
         f->f_iblock -= delta_iblock;
         PyTryBlock *b = &f->f_blockstack[f->f_iblock];
-        delta += (int)(f->f_stacktop - f->f_valuestack) - b->b_level;
+        delta += f->f_stackchunk.stack_offset - b->b_level;
         if (b->b_type == SETUP_FINALLY &&
             code[b->b_handler] == WITH_CLEANUP_START)
         {
@@ -319,8 +319,9 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
             delta++;
         }
     }
+    
     while (delta > 0) {
-        PyObject *v = (*--f->f_stacktop);
+        PyObject *v = datastack_chunk_pop_value(&f->f_stackchunk);
         Py_DECREF(v);
         delta--;
     }
@@ -368,33 +369,13 @@ static PyGetSetDef frame_getsetlist[] = {
 };
 
 /* Stack frames are allocated and deallocated at a considerable rate.
-   In an attempt to improve the speed of function calls, we:
-
-   1. Hold a single "zombie" frame on each code object. This retains
-   the allocated and initialised frame object from an invocation of
-   the code object. The zombie is reanimated the next time we need a
-   frame object for that code object. Doing this saves the malloc/
-   realloc required when using a free_list frame that isn't the
-   correct size. It also saves some field initialisation.
-
-   In zombie mode, no field of PyFrameObject holds a reference, but
-   the following fields are still valid:
-
-     * ob_type, ob_size, f_code, f_valuestack;
-
-     * f_locals, f_trace are NULL;
-
-     * f_localsplus does not require re-allocation and
-       the local variables in f_localsplus are NULL.
-
-   2. We also maintain a separate free list of stack frames (just like
+   In an attempt to improve the speed of function calls, we
+   maintain a separate free list of stack frames (just like
    floats are allocated in a special way -- see floatobject.c).  When
    a stack frame is on the free list, only the following members have
    a meaning:
     ob_type             == &Frametype
     f_back              next item on free list, or NULL
-    f_stacksize         size of value stack
-    ob_size             size of localsplus
    Note that the value and block stacks are preserved -- this can save
    another malloc() call or two (and two free() calls as well!).
    Also note that, unlike for integers, each frame object is a
@@ -417,7 +398,6 @@ static int numfree = 0;         /* number of frames currently in free_list */
 static void _Py_HOT_FUNCTION
 frame_dealloc(PyFrameObject *f)
 {
-    PyObject **p, **valuestack;
     PyCodeObject *co;
 
     if (_PyObject_GC_IS_TRACKED(f))
@@ -425,15 +405,8 @@ frame_dealloc(PyFrameObject *f)
 
     Py_TRASHCAN_SAFE_BEGIN(f)
     /* Kill all local variables */
-    valuestack = f->f_valuestack;
-    for (p = f->f_localsplus; p < valuestack; p++)
-        Py_CLEAR(*p);
-
-    /* Free stack */
-    if (f->f_stacktop != NULL) {
-        for (p = valuestack; p < f->f_stacktop; p++)
-            Py_XDECREF(*p);
-    }
+    /* clear and deallocate locals and stack */
+    datastack_chunk_dealloc(&f->f_stackchunk);
 
     Py_XDECREF(f->f_back);
     Py_DECREF(f->f_builtins);
@@ -442,9 +415,7 @@ frame_dealloc(PyFrameObject *f)
     Py_CLEAR(f->f_trace);
 
     co = f->f_code;
-    if (co->co_zombieframe == NULL)
-        co->co_zombieframe = f;
-    else if (numfree < PyFrame_MAXFREELIST) {
+    if (numfree < PyFrame_MAXFREELIST) {
         ++numfree;
         f->f_back = free_list;
         free_list = f;
@@ -459,9 +430,6 @@ frame_dealloc(PyFrameObject *f)
 static int
 frame_traverse(PyFrameObject *f, visitproc visit, void *arg)
 {
-    PyObject **fastlocals, **p;
-    Py_ssize_t i, slots;
-
     Py_VISIT(f->f_back);
     Py_VISIT(f->f_code);
     Py_VISIT(f->f_builtins);
@@ -470,47 +438,24 @@ frame_traverse(PyFrameObject *f, visitproc visit, void *arg)
     Py_VISIT(f->f_trace);
 
     /* locals */
-    slots = f->f_code->co_nlocals + PyTuple_GET_SIZE(f->f_code->co_cellvars) + PyTuple_GET_SIZE(f->f_code->co_freevars);
-    fastlocals = f->f_localsplus;
-    for (i = slots; --i >= 0; ++fastlocals)
-        Py_VISIT(*fastlocals);
-
-    /* stack */
-    if (f->f_stacktop != NULL) {
-        for (p = f->f_valuestack; p < f->f_stacktop; p++)
-            Py_VISIT(*p);
-    }
-    return 0;
+    return datastack_chunk_traverse(&f->f_stackchunk, visit, arg);
 }
 
 static int
 frame_tp_clear(PyFrameObject *f)
 {
-    PyObject **fastlocals, **p, **oldtop;
-    Py_ssize_t i, slots;
-
     /* Before anything else, make sure that this frame is clearly marked
      * as being defunct!  Else, e.g., a generator reachable from this
      * frame may also point to this frame, believe itself to still be
      * active, and try cleaning up this frame again.
      */
-    oldtop = f->f_stacktop;
-    f->f_stacktop = NULL;
+    f->f_completed = 1;
     f->f_executing = 0;
 
     Py_CLEAR(f->f_trace);
 
-    /* locals */
-    slots = f->f_code->co_nlocals + PyTuple_GET_SIZE(f->f_code->co_cellvars) + PyTuple_GET_SIZE(f->f_code->co_freevars);
-    fastlocals = f->f_localsplus;
-    for (i = slots; --i >= 0; ++fastlocals)
-        Py_CLEAR(*fastlocals);
-
-    /* stack */
-    if (oldtop != NULL) {
-        for (p = f->f_valuestack; p < oldtop; p++)
-            Py_CLEAR(*p);
-    }
+    /* clear locals and stack */
+    datastack_chunk_clear(&f->f_stackchunk);
     return 0;
 }
 
@@ -542,8 +487,7 @@ frame_sizeof(PyFrameObject *f, PyObject *Py_UNUSED(ignored))
     nfrees = PyTuple_GET_SIZE(f->f_code->co_freevars);
     extras = f->f_code->co_stacksize + f->f_code->co_nlocals +
              ncells + nfrees;
-    /* subtract one as it is already included in PyFrameObject */
-    res = sizeof(PyFrameObject) + (extras-1) * sizeof(PyObject *);
+    res = sizeof(PyFrameObject) + extras * sizeof(PyObject *);
 
     return PyLong_FromSsize_t(res);
 }
@@ -652,52 +596,35 @@ _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
         assert(builtins != NULL);
         Py_INCREF(builtins);
     }
-    if (code->co_zombieframe != NULL) {
-        f = code->co_zombieframe;
-        code->co_zombieframe = NULL;
-        _Py_NewReference((PyObject *)f);
-        assert(f->f_code == code);
+    if (free_list == NULL) {
+        f = PyObject_GC_New(PyFrameObject, &PyFrame_Type);
+        if (f == NULL) {
+            Py_DECREF(builtins);
+            return NULL;
+        }
     }
     else {
-        Py_ssize_t extras, ncells, nfrees;
-        ncells = PyTuple_GET_SIZE(code->co_cellvars);
-        nfrees = PyTuple_GET_SIZE(code->co_freevars);
-        extras = code->co_stacksize + code->co_nlocals + ncells +
-            nfrees;
-        if (free_list == NULL) {
-            f = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type,
-            extras);
-            if (f == NULL) {
-                Py_DECREF(builtins);
-                return NULL;
-            }
-        }
-        else {
-            assert(numfree > 0);
-            --numfree;
-            f = free_list;
-            free_list = free_list->f_back;
-            if (Py_SIZE(f) < extras) {
-                PyFrameObject *new_f = PyObject_GC_Resize(PyFrameObject, f, extras);
-                if (new_f == NULL) {
-                    PyObject_GC_Del(f);
-                    Py_DECREF(builtins);
-                    return NULL;
-                }
-                f = new_f;
-            }
-            _Py_NewReference((PyObject *)f);
-        }
-
-        f->f_code = code;
-        extras = code->co_nlocals + ncells + nfrees;
-        f->f_valuestack = f->f_localsplus + extras;
-        for (i=0; i<extras; i++)
-            f->f_localsplus[i] = NULL;
-        f->f_locals = NULL;
-        f->f_trace = NULL;
+        assert(numfree > 0);
+        --numfree;
+        f = free_list;
+        free_list = free_list->f_back;
+        _Py_NewReference((PyObject *)f);
     }
-    f->f_stacktop = f->f_valuestack;
+    
+    Py_ssize_t locals_count, locals_plus_stack, ncells, nfrees;
+    ncells = PyTuple_GET_SIZE(code->co_cellvars);
+    nfrees = PyTuple_GET_SIZE(code->co_freevars);
+    locals_count = code->co_nlocals + ncells + nfrees;
+    locals_plus_stack = locals_count + code->co_stacksize;
+    f->f_code = code;
+    push_new_datastack_chunk(&tstate->datastack, locals_plus_stack, &f->f_stackchunk);
+    for (i=0; i<locals_count; i++) {
+        f->f_stackchunk.base[i] = NULL;
+    }
+    f->f_stackchunk.stack_offset = locals_count;
+    f->f_locals = NULL;
+    f->f_trace = NULL;
+
     f->f_builtins = builtins;
     Py_XINCREF(back);
     f->f_back = back;
@@ -730,7 +657,7 @@ _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
     f->f_gen = NULL;
     f->f_trace_opcodes = 0;
     f->f_trace_lines = 1;
-
+    f->f_completed = 0;
     return f;
 }
 
@@ -739,8 +666,11 @@ PyFrame_New(PyThreadState *tstate, PyCodeObject *code,
             PyObject *globals, PyObject *locals)
 {
     PyFrameObject *f = _PyFrame_New_NoTrack(tstate, code, globals, locals);
-    if (f)
+    if (f) {
+        persist_datastack_chunk(&f->f_stackchunk);
+        pop_datastack_chunk(&tstate->datastack, &f->f_stackchunk);
         _PyObject_GC_TRACK(f);
+    }
     return f;
 }
 
@@ -895,7 +825,12 @@ PyFrame_FastToLocalsWithError(PyFrameObject *f)
                      Py_TYPE(map)->tp_name);
         return -1;
     }
-    fast = f->f_localsplus;
+    ncells = PyTuple_GET_SIZE(co->co_cellvars);
+    nfreevars = PyTuple_GET_SIZE(co->co_freevars);
+    fast = f->f_stackchunk.base;
+    if (fast == NULL) {
+        return 0;
+    }
     j = PyTuple_GET_SIZE(map);
     if (j > co->co_nlocals)
         j = co->co_nlocals;
@@ -903,8 +838,6 @@ PyFrame_FastToLocalsWithError(PyFrameObject *f)
         if (map_to_dict(map, j, locals, fast, 0) < 0)
             return -1;
     }
-    ncells = PyTuple_GET_SIZE(co->co_cellvars);
-    nfreevars = PyTuple_GET_SIZE(co->co_freevars);
     if (ncells || nfreevars) {
         if (map_to_dict(co->co_cellvars, ncells,
                         locals, fast + co->co_nlocals, 1))
@@ -959,7 +892,7 @@ PyFrame_LocalsToFast(PyFrameObject *f, int clear)
     if (!PyTuple_Check(map))
         return;
     PyErr_Fetch(&error_type, &error_value, &error_traceback);
-    fast = f->f_localsplus;
+    fast = f->f_stackchunk.base;
     j = PyTuple_GET_SIZE(map);
     if (j > co->co_nlocals)
         j = co->co_nlocals;

@@ -297,7 +297,7 @@ function_code_fastcall(PyCodeObject *co, PyObject *const *args, Py_ssize_t nargs
         return NULL;
     }
 
-    PyObject **fastlocals = f->f_localsplus;
+    PyObject **fastlocals = f->f_stackchunk.base;
 
     for (Py_ssize_t i = 0; i < nargs; i++) {
         Py_INCREF(*args);
@@ -306,11 +306,15 @@ function_code_fastcall(PyCodeObject *co, PyObject *const *args, Py_ssize_t nargs
     PyObject *result = PyEval_EvalFrameEx(f, 0);
 
     if (Py_REFCNT(f) > 1) {
+        persist_datastack_chunk(&f->f_stackchunk);
+        pop_datastack_chunk(&tstate->datastack, &f->f_stackchunk);
         Py_DECREF(f);
         _PyObject_GC_TRACK(f);
     }
     else {
         ++tstate->recursion_depth;
+        datastack_chunk_clear(&f->f_stackchunk);
+        pop_datastack_chunk(&tstate->datastack, &f->f_stackchunk);
         Py_DECREF(f);
         --tstate->recursion_depth;
     }

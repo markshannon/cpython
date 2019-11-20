@@ -868,9 +868,10 @@ class PyFrameObjectPtr(PyObjectPtr):
         if self.is_optimized_out():
             return
 
-        f_localsplus = self.field('f_localsplus')
+        f_stackchunk = self.field('f_stackchunk')
+        f_locals = f_stackchunk['base']
         for i in safe_range(self.co_nlocals):
-            pyop_value = PyObjectPtr.from_pyobject_ptr(f_localsplus[i])
+            pyop_value = PyObjectPtr.from_pyobject_ptr(f_locals[i])
             if not pyop_value.is_null():
                 pyop_name = PyObjectPtr.from_pyobject_ptr(self.co_varnames[i])
                 yield (pyop_name, pyop_value)

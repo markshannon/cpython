@@ -6,6 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include "internal/pycore_stacks.h"
 
 typedef struct {
     int b_type;                 /* what kind of block this is */
@@ -14,20 +15,17 @@ typedef struct {
 } PyTryBlock;
 
 typedef struct _frame {
-    PyObject_VAR_HEAD
+    PyObject_HEAD
     struct _frame *f_back;      /* previous frame, or NULL */
     PyCodeObject *f_code;       /* code segment */
     PyObject *f_builtins;       /* builtin symbol table (PyDictObject) */
     PyObject *f_globals;        /* global symbol table (PyDictObject) */
     PyObject *f_locals;         /* local symbol table (any mapping) */
-    PyObject **f_valuestack;    /* points after the last local */
-    /* Next free slot in f_valuestack.  Frame creation sets to f_valuestack.
-       Frame evaluation usually NULLs it, but a frame that yields sets it
-       to the current stack top. */
-    PyObject **f_stacktop;
+    PyDataStackChunk f_stackchunk;
     PyObject *f_trace;          /* Trace function */
     char f_trace_lines;         /* Emit per-line trace events? */
     char f_trace_opcodes;       /* Emit per-opcode trace events? */
+    char f_completed;           /* Has this frame completed? */
 
     /* Borrowed reference to a generator, or NULL */
     PyObject *f_gen;
@@ -42,7 +40,6 @@ typedef struct _frame {
     int f_iblock;               /* index in f_blockstack */
     char f_executing;           /* whether the frame is still executing */
     PyTryBlock f_blockstack[CO_MAXBLOCKS]; /* for try and loop blocks */
-    PyObject *f_localsplus[1];  /* locals+stack, dynamically sized */
 } PyFrameObject;
 
 

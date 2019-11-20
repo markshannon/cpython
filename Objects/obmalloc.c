@@ -431,7 +431,7 @@ _PyMem_GetCurrentAllocatorName(void)
 #undef PYDBGOBJ_ALLOC
 
 
-static PyObjectArenaAllocator _PyObject_Arena = {NULL,
+PyObjectArenaAllocator _PyObject_Arena = {NULL,
 #ifdef MS_WINDOWS
     _PyObject_ArenaVirtualAlloc, _PyObject_ArenaVirtualFree
 #elif defined(ARENAS_USE_MMAP)

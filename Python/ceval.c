@@ -942,8 +942,7 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
 
 /* The stack can grow at most MAXINT deep, as co_nlocals and
    co_stacksize are ints. */
-#define STACK_LEVEL()     ((int)(stack_pointer - f->f_valuestack))
-#define EMPTY()           (STACK_LEVEL() == 0)
+#define STACK_LEVEL()     ((int)(stack_pointer - fastlocals))
 #define TOP()             (stack_pointer[-1])
 #define SECOND()          (stack_pointer[-2])
 #define THIRD()           (stack_pointer[-3])
@@ -961,20 +960,21 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
 #ifdef LLTRACE
 #define PUSH(v)         { (void)(BASIC_PUSH(v), \
                           lltrace && prtrace(tstate, TOP(), "push")); \
-                          assert(STACK_LEVEL() <= co->co_stacksize); }
+                          assert(stack_pointer - stack_base <= co->co_stacksize); }
 #define POP()           ((void)(lltrace && prtrace(tstate, TOP(), "pop")), \
+                        assert(stack_pointer > stack_base), \
                          BASIC_POP())
 #define STACK_GROW(n)   do { \
                           assert(n >= 0); \
                           (void)(BASIC_STACKADJ(n), \
                           lltrace && prtrace(tstate, TOP(), "stackadj")); \
-                          assert(STACK_LEVEL() <= co->co_stacksize); \
+                          assert(stack_pointer - stack_base <= co->co_stacksize); \
                         } while (0)
 #define STACK_SHRINK(n) do { \
                             assert(n >= 0); \
                             (void)(lltrace && prtrace(tstate, TOP(), "stackadj")); \
                             (void)(BASIC_STACKADJ(-n)); \
-                            assert(STACK_LEVEL() <= co->co_stacksize); \
+                            assert(stack_pointer - stack_base <= co->co_stacksize); \
                         } while (0)
 #define EXT_POP(STACK_POINTER) ((void)(lltrace && \
                                 prtrace(tstate, (STACK_POINTER)[-1], "ext_pop")), \
@@ -1118,8 +1118,9 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
     co = f->f_code;
     names = co->co_names;
     consts = co->co_consts;
-    fastlocals = f->f_localsplus;
-    freevars = f->f_localsplus + co->co_nlocals;
+    fastlocals = f->f_stackchunk.base;
+    freevars = f->f_stackchunk.base + co->co_nlocals;
+    PyObject **stack_base = freevars +  PyTuple_GET_SIZE(co->co_cellvars) + PyTuple_GET_SIZE(co->co_freevars);
     assert(PyBytes_Check(co->co_code));
     assert(PyBytes_GET_SIZE(co->co_code) <= INT_MAX);
     assert(PyBytes_GET_SIZE(co->co_code) % sizeof(_Py_CODEUNIT) == 0);
@@ -1146,9 +1147,8 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
         assert(f->f_lasti % sizeof(_Py_CODEUNIT) == 0);
         next_instr += f->f_lasti / sizeof(_Py_CODEUNIT) + 1;
     }
-    stack_pointer = f->f_stacktop;
+    stack_pointer = PyDataStackChunk_SwapStackPointer(&f->f_stackchunk, stack_base);
     assert(stack_pointer != NULL);
-    f->f_stacktop = NULL;       /* remains NULL unless yield suspends frame */
     f->f_executing = 1;
 
     if (co->co_opcache_flag < OPCACHE_MIN_RUNS) {
@@ -1182,8 +1182,8 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
 
 main_loop:
     for (;;) {
-        assert(stack_pointer >= f->f_valuestack); /* else underflow */
-        assert(STACK_LEVEL() <= co->co_stacksize);  /* else overflow */
+        assert(stack_pointer >= stack_base); /* else underflow */
+        assert(stack_pointer <= stack_base + co->co_stacksize);  /* else overflow */
         assert(!_PyErr_Occurred(tstate));
 
         /* Do periodic things.  Doing this every time through
@@ -1272,7 +1272,8 @@ main_loop:
             int err;
             /* see maybe_call_line_trace
                for expository comments */
-            f->f_stacktop = stack_pointer;
+            PyDataStackChunk_SwapStackPointer(&f->f_stackchunk, stack_pointer);
+            stack_pointer = NULL;
 
             err = maybe_call_line_trace(tstate->c_tracefunc,
                                         tstate->c_traceobj,
@@ -1280,10 +1281,7 @@ main_loop:
                                         &instr_lb, &instr_ub, &instr_prev);
             /* Reload possibly changed frame fields */
             JUMPTO(f->f_lasti);
-            if (f->f_stacktop != NULL) {
-                stack_pointer = f->f_stacktop;
-                f->f_stacktop = NULL;
-            }
+            stack_pointer = PyDataStackChunk_SwapStackPointer(&f->f_stackchunk, stack_base);
             if (err)
                 /* trace function raised an exception */
                 goto error;
@@ -2068,7 +2066,6 @@ main_loop:
                 DISPATCH();
             }
             /* receiver remains on stack, retval is value to be yielded */
-            f->f_stacktop = stack_pointer;
             /* and repeat... */
             assert(f->f_lasti >= (int)sizeof(_Py_CODEUNIT));
             f->f_lasti -= sizeof(_Py_CODEUNIT);
@@ -2088,7 +2085,6 @@ main_loop:
                 retval = w;
             }
 
-            f->f_stacktop = stack_pointer;
             goto exit_yielding;
         }
 
@@ -3717,6 +3713,7 @@ error:
 
         /* Log traceback info. */
         PyTraceBack_Here(f);
+        f->f_completed = 1;
 
         if (tstate->c_tracefunc != NULL)
             call_exc_trace(tstate->c_tracefunc, tstate->c_traceobj,
@@ -3770,6 +3767,7 @@ exception_unwind:
                 PUSH(val);
                 PUSH(exc);
                 JUMPTO(handler);
+                f->f_completed = 0;
                 /* Resume normal execution */
                 goto main_loop;
             }
@@ -3781,16 +3779,21 @@ exception_unwind:
 
     assert(retval == NULL);
     assert(_PyErr_Occurred(tstate));
-
-exit_returning:
-
-    /* Pop remaining stack entries. */
-    while (!EMPTY()) {
+    
+    /* Pop remaining entries on the stack */
+    while (stack_pointer > stack_base) {
         PyObject *o = POP();
-        Py_XDECREF(o);
+        Py_XDECREF(o);  
     }
 
+exit_returning:
+    f->f_completed = 1;
+
 exit_yielding:
+
+    assert(stack_pointer >= stack_base);
+    PyDataStackChunk_SwapStackPointer(&f->f_stackchunk, stack_pointer);
+    stack_pointer = NULL;
     if (tstate->use_tracing) {
         if (tstate->c_tracefunc) {
             if (call_trace_protected(tstate->c_tracefunc, tstate->c_traceobj,
@@ -4073,8 +4076,8 @@ _PyEval_EvalCodeWithName(PyObject *_co, PyObject *globals, PyObject *locals,
     if (f == NULL) {
         return NULL;
     }
-    fastlocals = f->f_localsplus;
-    freevars = f->f_localsplus + co->co_nlocals;
+    fastlocals = f->f_stackchunk.base;
+    freevars = fastlocals + co->co_nlocals;
 
     /* Create a dictionary for keyword parameters (**kwags) */
     if (co->co_flags & CO_VARKEYWORDS) {
@@ -4276,6 +4279,10 @@ _PyEval_EvalCodeWithName(PyObject *_co, PyObject *globals, PyObject *locals,
         /* Don't need to keep the reference to f_back, it will be set
          * when the generator is resumed. */
         Py_CLEAR(f->f_back);
+        
+        /* Move the locals and stack to the heap */
+        persist_datastack_chunk(&f->f_stackchunk);
+        pop_datastack_chunk(&tstate->datastack, &f->f_stackchunk);
 
         /* Create a new generator that owns the ready to run frame
          * and return that as the value. */
@@ -4306,11 +4313,15 @@ fail: /* Jump here from prelude on failure */
     */
     assert(tstate != NULL);
     if (Py_REFCNT(f) > 1) {
+        persist_datastack_chunk(&f->f_stackchunk);
+        pop_datastack_chunk(&tstate->datastack, &f->f_stackchunk);
         Py_DECREF(f);
         _PyObject_GC_TRACK(f);
     }
     else {
         ++tstate->recursion_depth;
+        datastack_chunk_clear(&f->f_stackchunk);
+        pop_datastack_chunk(&tstate->datastack, &f->f_stackchunk);
         Py_DECREF(f);
         --tstate->recursion_depth;
     }
@@ -5485,14 +5496,14 @@ unicode_concatenate(PyThreadState *tstate, PyObject *v, PyObject *w,
         switch (opcode) {
         case STORE_FAST:
         {
-            PyObject **fastlocals = f->f_localsplus;
+            PyObject **fastlocals = f->f_stackchunk.base;
             if (GETLOCAL(oparg) == v)
                 SETLOCAL(oparg, NULL);
             break;
         }
         case STORE_DEREF:
         {
-            PyObject **freevars = (f->f_localsplus +
+            PyObject **freevars = (f->f_stackchunk.base +
                                    f->f_code->co_nlocals);
             PyObject *c = freevars[oparg];
             if (PyCell_GET(c) ==  v) {
