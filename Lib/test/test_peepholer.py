@@ -415,10 +415,10 @@ class TestTranforms(BytecodeTestCase):
             while 1:
                 if cond1: return 4
         self.assertNotInBytecode(f, 'JUMP_FORWARD')
-        # There should be one jump for the while loop.
+        # There should be not more than one jump for the while loop.
         returns = [instr for instr in dis.get_instructions(f)
                           if instr.opname == 'JUMP_ABSOLUTE']
-        self.assertEqual(len(returns), 1)
+        self.assertLessEqual(len(returns), 1)
         returns = [instr for instr in dis.get_instructions(f)
                           if instr.opname == 'RETURN_VALUE']
         self.assertLessEqual(len(returns), 2)

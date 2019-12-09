@@ -827,7 +827,7 @@ class JumpTestCase(unittest.TestCase):
             output.append(11)
         output.append(12)
 
-    @jump_test(5, 11, [2, 4, 12])
+    @jump_test(5, 11, [2, 4], (ValueError, 'after'))
     def test_jump_over_return_try_finally_in_finally_block(output):
         try:
             output.append(2)
@@ -842,7 +842,7 @@ class JumpTestCase(unittest.TestCase):
             pass
         output.append(12)
 
-    @jump_test(3, 4, [1, 4])
+    @jump_test(3, 4, [1], (ValueError, 'after'))
     def test_jump_infinite_while_loop(output):
         output.append(1)
         while True:
@@ -1236,16 +1236,16 @@ class JumpTestCase(unittest.TestCase):
             output.append(7)
         output.append(8)
 
-    @jump_test(1, 5, [], (ValueError, "into a 'finally'"))
-    def test_no_jump_into_finally_block(output):
+    @jump_test(1, 5, [5])
+    def test_jump_into_finally_block(output):
         output.append(1)
         try:
             output.append(3)
         finally:
             output.append(5)
 
-    @jump_test(3, 6, [2, 5, 6], (ValueError, "into a 'finally'"))
-    def test_no_jump_into_finally_block_from_try_block(output):
+    @jump_test(3, 6, [2, 6, 7])
+    def test_jump_into_finally_block_from_try_block(output):
         try:
             output.append(2)
             output.append(3)
@@ -1254,8 +1254,8 @@ class JumpTestCase(unittest.TestCase):
             output.append(6)
         output.append(7)
 
-    @jump_test(5, 1, [1, 3], (ValueError, "out of a 'finally'"))
-    def test_no_jump_out_of_finally_block(output):
+    @jump_test(5, 1, [1, 3, 1, 3, 5])
+    def test_jump_out_of_finally_block(output):
         output.append(1)
         try:
             output.append(3)
@@ -1320,23 +1320,23 @@ class JumpTestCase(unittest.TestCase):
             output.append(6)
             output.append(7)
 
-    @jump_test(3, 5, [1, 2, -2], (ValueError, 'into'))
-    def test_no_jump_between_with_blocks(output):
+    @jump_test(3, 5, [1, 2, 5, -2])
+    def test_jump_between_with_blocks(output):
         output.append(1)
         with tracecontext(output, 2):
             output.append(3)
         with tracecontext(output, 4):
             output.append(5)
 
-    @async_jump_test(3, 5, [1, 2, -2], (ValueError, 'into'))
-    async def test_no_jump_between_async_with_blocks(output):
+    @async_jump_test(3, 5, [1, 2, 5, -2])
+    async def test_jump_between_async_with_blocks(output):
         output.append(1)
         async with asynctracecontext(output, 2):
             output.append(3)
         async with asynctracecontext(output, 4):
             output.append(5)
 
-    @jump_test(5, 7, [2, 4], (ValueError, 'finally'))
+    @jump_test(5, 7, [2, 4], (ValueError, 'after'))
     def test_no_jump_over_return_out_of_finally_block(output):
         try:
             output.append(2)

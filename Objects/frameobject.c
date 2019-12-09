@@ -66,6 +66,39 @@ get_arg(const _Py_CODEUNIT *codestr, Py_ssize_t i)
     return oparg;
 }
 
+typedef enum kind {
+    With = 1,
+    Loop = 2,
+    Try = 3,
+    Except = 4,
+} Kind;
+
+#define BITS_PER_BLOCK 3
+
+int64_t push_block(int64_t stack, Kind kind) {
+    assert(stack < ((int64_t)1)<<(BITS_PER_BLOCK*CO_MAXBLOCKS));
+    return (stack << BITS_PER_BLOCK) | kind;
+}
+
+int64_t pop_block(int64_t stack) {
+    assert(stack > 0);
+    return stack >> BITS_PER_BLOCK;
+}
+
+Kind top_block(int64_t stack) {
+    return stack & ((1<<BITS_PER_BLOCK)-1);
+}
+
+int block_stack_depth(int64_t stack) {
+    int result = 0;
+    while (stack) {
+        stack >>= BITS_PER_BLOCK;
+        result++;
+    }
+    return result;
+}
+
+
 typedef struct _codetracker {
     unsigned char *code;
     Py_ssize_t code_len;
@@ -78,6 +111,143 @@ typedef struct _codetracker {
     int line_addr;
 } codetracker;
 
+static int64_t *
+markblocks(codetracker *tracker)
+{
+    const _Py_CODEUNIT *code = (const _Py_CODEUNIT *)tracker->code;
+    int len = tracker->code_len/sizeof(_Py_CODEUNIT);
+    int64_t *blocks = PyMem_New(int64_t, len+1);
+    int i, j, opcode;
+
+    if (blocks == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    memset(blocks, -1, (len+1)*sizeof(int64_t));
+    blocks[0] = 0;
+    int todo = 1;
+    while (todo) {
+        todo = 0;
+        for (i = 0; i < len; i++) {
+            int64_t block_stack = blocks[i];
+            int64_t except_stack;
+            if (block_stack == -1) {
+                todo = 1;
+                continue;
+            }
+            opcode = _Py_OPCODE(code[i]);
+            switch (opcode) {
+                case JUMP_IF_FALSE_OR_POP:
+                case JUMP_IF_TRUE_OR_POP:
+                case POP_JUMP_IF_FALSE:
+                case POP_JUMP_IF_TRUE:
+                    j = get_arg(code, i) / sizeof(_Py_CODEUNIT);
+                    assert(j < len);
+                    assert(blocks[j] == -1 || blocks[j] == block_stack);
+                    blocks[j] = block_stack;
+                    blocks[i+1] = block_stack;
+                    break;
+                case JUMP_ABSOLUTE:
+                    j = get_arg(code, i) / sizeof(_Py_CODEUNIT);
+                    assert(j < len);
+                    assert(blocks[j] == -1 || blocks[j] == block_stack);
+                    blocks[j] = block_stack;
+                    break;
+                case SETUP_FINALLY:
+                    j = get_arg(code, i) / sizeof(_Py_CODEUNIT);
+                    assert(j < len);
+                    assert(blocks[j] == -1 || blocks[j] == block_stack);
+                    except_stack = push_block(block_stack, Except);
+                    blocks[j] = except_stack;
+                    block_stack = push_block(block_stack, Try);
+                    blocks[i+1] = block_stack;
+                    break;
+                case SETUP_WITH:
+                case SETUP_ASYNC_WITH:
+                    j = get_arg(code, i) / sizeof(_Py_CODEUNIT);
+                    assert(j < len);
+                    assert(blocks[j] == -1 || blocks[j] == block_stack);
+                    except_stack = push_block(block_stack, Except);
+                    blocks[j] = except_stack;
+                    block_stack = push_block(block_stack, With);
+                    blocks[i+1] = block_stack;
+                    break;
+                case JUMP_FORWARD:
+                    j = get_arg(code, i) / sizeof(_Py_CODEUNIT) + i + 1;
+                    assert(j < len);
+                    assert(blocks[j] == -1 || blocks[j] == block_stack);
+                    blocks[j] = block_stack;
+                    break;
+                case GET_ITER:
+                case GET_AITER:
+                    block_stack = push_block(block_stack, Loop);
+                    blocks[i+1] = block_stack;
+                    break;
+                case FOR_ITER:
+                    blocks[i+1] = block_stack;
+                    block_stack = pop_block(block_stack);
+                    j = get_arg(code, i) / sizeof(_Py_CODEUNIT);
+                    assert(j < len);
+                    assert(blocks[j] == -1 || blocks[j] == block_stack);
+                    blocks[j] = block_stack;
+                    break;
+                case POP_BLOCK:
+                case POP_EXCEPT:
+                    block_stack = pop_block(block_stack);
+                    blocks[i+1] = block_stack;
+                    break;
+                case END_ASYNC_FOR:
+                    block_stack = pop_block(pop_block(block_stack));
+                    blocks[i+1] = block_stack;
+                    break;
+                case RETURN_VALUE:
+                case RAISE_VARARGS:
+                case RERAISE:
+                    /* End of block */
+                    break;
+                default:
+                    blocks[i+1] = block_stack;
+
+            }
+        }
+    }
+    return blocks;
+}
+
+int compatible_block_stack(int64_t from_stack, int64_t to_stack) {
+    while(from_stack > to_stack) {
+        from_stack = pop_block(from_stack);
+    }
+    return from_stack == to_stack;
+}
+
+const char *explain_incompatible_block_stack(int64_t to_stack) {
+    assert (to_stack > 0);
+    Kind target_kind = top_block(to_stack);
+    switch(target_kind) {
+        case Except:
+            return "can't jump into an 'except' block as there's no exception";
+        case Try:
+            return "can't jump into the body of a try statement";
+        case With:
+            return "can't jump into the body of a with statement";
+        case Loop:
+            return "can't jump into the body of a for loop";
+        default:
+            Py_UNREACHABLE();
+    }
+}
+
+static void align_line_and_address(codetracker *tracker)
+{
+    while (tracker->offset < tracker->lnotab_len &&
+           tracker->addr >= tracker->line_addr + tracker->lnotab[tracker->offset]) {
+        tracker->line_addr += tracker->lnotab[tracker->offset];
+        tracker->line += (signed char)tracker->lnotab[tracker->offset+1];
+        tracker->offset += 2;
+    }
+}
+
 /* Reset the mutable parts of the tracker */
 static void
 reset(codetracker *tracker)
@@ -86,6 +256,7 @@ reset(codetracker *tracker)
     tracker->addr = 0;
     tracker->line_addr = 0;
     tracker->line = tracker->start_line;
+    align_line_and_address(tracker);
 }
 
 /* Initialise the tracker */
@@ -107,12 +278,7 @@ advance_tracker(codetracker *tracker)
     if (tracker->offset >= tracker->lnotab_len) {
         return;
     }
-    while (tracker->offset < tracker->lnotab_len &&
-           tracker->addr >= tracker->line_addr + tracker->lnotab[tracker->offset]) {
-        tracker->line_addr += tracker->lnotab[tracker->offset];
-        tracker->line += (signed char)tracker->lnotab[tracker->offset+1];
-        tracker->offset += 2;
-    }
+    align_line_and_address(tracker);
 }
 
 
@@ -146,6 +312,27 @@ move_to_addr(codetracker *tracker, int addr)
 }
 
 static int
+advance_to_start_of_line(codetracker *tracker, int line)
+{
+    while (tracker->addr < tracker->code_len) {
+        if (tracker->line == line) {
+            return 0;
+        }
+        advance_tracker(tracker);
+    }
+    return -1;
+}
+
+static void
+advance_to_different_line(codetracker *tracker)
+{
+    int line = tracker->line;
+    while (tracker->addr < tracker->code_len && tracker->line == line) {
+        advance_tracker(tracker);
+    }
+}
+
+static int
 first_line_not_before(codetracker *tracker, int line)
 {
     int result = INT_MAX;
@@ -163,166 +350,6 @@ first_line_not_before(codetracker *tracker, int line)
         return -1;
     }
     return result;
-}
-
-static int
-move_to_nearest_start_of_line(codetracker *tracker, int line)
-{
-    if (line > tracker->line) {
-        while (line != tracker->line) {
-            advance_tracker(tracker);
-            if (tracker->addr >= tracker->code_len) {
-                return -1;
-            }
-        }
-    }
-    else {
-        while (line != tracker->line) {
-            retreat_tracker(tracker);
-            if (tracker->addr < 0) {
-                return -1;
-            }
-        }
-        while (tracker->addr > tracker->line_addr) {
-            retreat_tracker(tracker);
-        }
-    }
-    return 0;
-}
-
-typedef struct _blockitem
-{
-    unsigned char kind;
-    int end_addr;
-    int start_line;
-} blockitem;
-
-typedef struct _blockstack
-{
-    blockitem stack[CO_MAXBLOCKS];
-    int depth;
-} blockstack;
-
-
-static void
-init_blockstack(blockstack *blocks)
-{
-    blocks->depth = 0;
-}
-
-static void
-push_block(blockstack *blocks, unsigned char kind,
-           int end_addr, int start_line)
-{
-    assert(blocks->depth < CO_MAXBLOCKS);
-    blocks->stack[blocks->depth].kind = kind;
-    blocks->stack[blocks->depth].end_addr = end_addr;
-    blocks->stack[blocks->depth].start_line = start_line;
-    blocks->depth++;
-}
-
-static unsigned char
-pop_block(blockstack *blocks)
-{
-    assert(blocks->depth > 0);
-    blocks->depth--;
-    return blocks->stack[blocks->depth].kind;
-}
-
-static blockitem *
-top_block(blockstack *blocks)
-{
-    assert(blocks->depth > 0);
-    return &blocks->stack[blocks->depth-1];
-}
-
-static inline int
-is_try_except(unsigned char op, int target_op)
-{
-    return op == SETUP_FINALLY && (target_op == DUP_TOP || target_op == POP_TOP);
-}
-
-static inline int
-is_async_for(unsigned char op, int target_op)
-{
-    return op == SETUP_FINALLY && target_op == END_ASYNC_FOR;
-}
-
-static inline int
-is_try_finally(unsigned char op, int target_op)
-{
-    return op == SETUP_FINALLY && !is_try_except(op, target_op) && !is_async_for(op, target_op);
-}
-
-/* Kind for finding except blocks in the jump to line code */
-#define TRY_EXCEPT 250
-
-static int
-block_stack_for_line(codetracker *tracker, int line, blockstack *blocks)
-{
-    if (line < tracker->start_line) {
-        return -1;
-    }
-    init_blockstack(blocks);
-    reset(tracker);
-    while (tracker->addr < tracker->code_len) {
-        if (tracker->line == line) {
-            return 0;
-        }
-        if (blocks->depth > 0 && tracker->addr == top_block(blocks)->end_addr) {
-            unsigned char kind = pop_block(blocks);
-            assert(kind != SETUP_FINALLY);
-            if (kind == TRY_EXCEPT) {
-                push_block(blocks, POP_EXCEPT, -1, tracker->line);
-            }
-            if (kind == SETUP_WITH || kind == SETUP_ASYNC_WITH) {
-                push_block(blocks, WITH_EXCEPT_START, -1, tracker->line);
-            }
-        }
-        unsigned char op = tracker->code[tracker->addr];
-        if (op == SETUP_FINALLY || op == SETUP_ASYNC_WITH || op == SETUP_WITH || op == FOR_ITER) {
-            unsigned int oparg = get_arg((const _Py_CODEUNIT *)tracker->code,
-                                        tracker->addr / sizeof(_Py_CODEUNIT));
-            int target_addr = tracker->addr + oparg + sizeof(_Py_CODEUNIT);
-            int target_op = tracker->code[target_addr];
-            if (is_async_for(op, target_op)) {
-                push_block(blocks, FOR_ITER, target_addr, tracker->line);
-            }
-            else if (op == FOR_ITER) {
-                push_block(blocks, FOR_ITER, target_addr-sizeof(_Py_CODEUNIT), tracker->line);
-            }
-            else if (is_try_except(op, target_op)) {
-                push_block(blocks, TRY_EXCEPT, target_addr-sizeof(_Py_CODEUNIT), tracker->line);
-            }
-            else if (is_try_finally(op, target_op)) {
-                int addr = tracker->addr;
-                // Skip over duplicate 'finally' blocks if line is after body.
-                move_to_addr(tracker, target_addr);
-                if (tracker->line > line) {
-                    // Target is in body, rewind to start.
-                    move_to_addr(tracker, addr);
-                    push_block(blocks, op, target_addr, tracker->line);
-                }
-                else {
-                    // Now in finally block.
-                    push_block(blocks, RERAISE, -1, tracker->line);
-                }
-            }
-            else {
-                push_block(blocks, op, target_addr, tracker->line);
-            }
-        }
-        else if (op == RERAISE) {
-            assert(blocks->depth > 0);
-            unsigned char kind = top_block(blocks)->kind;
-            if (kind == RERAISE || kind == WITH_EXCEPT_START || kind == POP_EXCEPT) {
-                pop_block(blocks);
-            }
-
-        }
-        advance_tracker(tracker);
-    }
-    return -1;
 }
 
 static void
@@ -456,80 +483,53 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
         return -1;
     }
 
-    /* Find block stack for current line and target line. */
-    blockstack current_stack, new_stack;
-    block_stack_for_line(&tracker, new_lineno, &new_stack);
-    block_stack_for_line(&tracker, current_line, &current_stack);
+    int64_t *blocks = markblocks(&tracker);
 
-    /* The trace function is called with a 'return' trace event after the
-     * execution of a yield statement. */
-    if (tracker.code[tracker.addr] == DUP_TOP || tracker.code[tracker.addr] == POP_TOP) {
-        PyErr_SetString(PyExc_ValueError,
-            "can't jump to 'except' line as there's no exception");
+    int64_t start_block_stack = blocks[f->f_lasti/sizeof(_Py_CODEUNIT)];
+    /* Find block stack for current line and target line. */
+    reset(&tracker);
+    advance_to_start_of_line(&tracker, new_lineno);
+    int64_t target_block_stack, best_block_stack = -1;
+    int best_addr;
+    do {
+        target_block_stack = blocks[tracker.addr/sizeof(_Py_CODEUNIT)];
+        if (compatible_block_stack(start_block_stack, target_block_stack) && target_block_stack > best_block_stack) {
+            best_block_stack = target_block_stack;
+            best_addr = tracker.addr;
+        }
+        advance_to_different_line(&tracker);
+    } while (advance_to_start_of_line(&tracker, new_lineno) >= 0);
+    if (best_block_stack < 0) {
+        const char *msg = explain_incompatible_block_stack(target_block_stack);
+        PyErr_SetString(PyExc_ValueError, msg);
         return -1;
     }
 
-    /* Validate change of block stack. */
-    if (new_stack.depth > 0) {
-        blockitem *current_block_at_new_depth = &(current_stack.stack[new_stack.depth-1]);
-        if (new_stack.depth > current_stack.depth ||
-            top_block(&new_stack)->start_line != current_block_at_new_depth->start_line) {
-            unsigned char target_kind = top_block(&new_stack)->kind;
-            char *msg;
-            if (target_kind == POP_EXCEPT) {
-                msg = "can't jump into an 'except' block as there's no exception";
-            }
-            else if (target_kind == RERAISE) {
-                msg = "can't jump into a 'finally' block";
-            }
-            else {
-                msg = "can't jump into the middle of a block";
-            }
-            PyErr_SetString(PyExc_ValueError, msg);
-            return -1;
-        }
-    }
-
-    /* Check for illegal jumps out of finally or except blocks. */
-    for (int depth = new_stack.depth; depth < current_stack.depth; depth++) {
-        switch(current_stack.stack[depth].kind) {
-        case RERAISE:
-            PyErr_SetString(PyExc_ValueError,
-                "can't jump out of a 'finally' block");
-            return -1;
-        case POP_EXCEPT:
-            PyErr_SetString(PyExc_ValueError,
-                "can't jump out of an 'except' block");
-            return -1;
-        }
-    }
-
     /* Unwind block stack. */
-    while (current_stack.depth > new_stack.depth) {
-        unsigned char kind = pop_block(&current_stack);
+    while (start_block_stack > best_block_stack) {
+        Kind kind = top_block(start_block_stack);
         switch(kind) {
-        case FOR_ITER:
+        case Loop:
             frame_stack_pop(f);
             break;
-        case SETUP_FINALLY:
-        case TRY_EXCEPT:
+        case Try:
             frame_block_unwind(f);
             break;
-        case SETUP_WITH:
-        case SETUP_ASYNC_WITH:
+        case With:
             frame_block_unwind(f);
             // Pop the exit function
             frame_stack_pop(f);
             break;
-        default:
-            PyErr_SetString(PyExc_SystemError,
-                "unexpected block kind");
+        case Except:
+            PyErr_SetString(PyExc_ValueError,
+                "can't jump out of an 'except' block");
             return -1;
         }
+        start_block_stack = pop_block(start_block_stack);
     }
 
-    move_to_addr(&tracker, f->f_lasti);
-    move_to_nearest_start_of_line(&tracker, new_lineno);
+    move_to_addr(&tracker, best_addr);
+    assert(tracker.line == new_lineno);
 
     /* Finally set the new f_lineno and f_lasti and return OK. */
     f->f_lineno = new_lineno;

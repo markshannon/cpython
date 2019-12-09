@@ -2151,7 +2151,6 @@ main_loop:
                 Py_DECREF(exc);
                 UNWIND_EXCEPT_HANDLER(b);
                 Py_DECREF(POP());
-                JUMPBY(oparg);
                 FAST_DISPATCH();
             }
             else {
@@ -3142,13 +3141,13 @@ main_loop:
             /* iterator ended normally */
             STACK_SHRINK(1);
             Py_DECREF(iter);
-            JUMPBY(oparg);
+            JUMPTO(oparg);
             PREDICT(POP_BLOCK);
             DISPATCH();
         }
 
         case TARGET(SETUP_FINALLY): {
-            PyFrame_BlockSetup(f, SETUP_FINALLY, INSTR_OFFSET() + oparg,
+            PyFrame_BlockSetup(f, SETUP_FINALLY, oparg,
                                STACK_LEVEL());
             DISPATCH();
         }
@@ -3181,7 +3180,7 @@ main_loop:
             PyObject *res = POP();
             /* Setup the finally block before pushing the result
                of __aenter__ on the stack. */
-            PyFrame_BlockSetup(f, SETUP_FINALLY, INSTR_OFFSET() + oparg,
+            PyFrame_BlockSetup(f, SETUP_FINALLY, oparg,
                                STACK_LEVEL());
             PUSH(res);
             DISPATCH();
@@ -3209,7 +3208,7 @@ main_loop:
                 goto error;
             /* Setup the finally block before pushing the result
                of __enter__ on the stack. */
-            PyFrame_BlockSetup(f, SETUP_FINALLY, INSTR_OFFSET() + oparg,
+            PyFrame_BlockSetup(f, SETUP_FINALLY, oparg,
                                STACK_LEVEL());
 
             PUSH(res);
@@ -3531,6 +3530,7 @@ main_loop:
         _unknown_opcode:
 #endif
         default:
+            assert(0);
             fprintf(stderr,
                 "XXX lineno: %d, opcode: %d\n",
                 PyFrame_GetLineNumber(f),

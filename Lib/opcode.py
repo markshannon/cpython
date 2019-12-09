@@ -131,7 +131,7 @@ HAVE_ARGUMENT = 90              # Opcodes from here have an argument:
 name_op('STORE_NAME', 90)       # Index in name list
 name_op('DELETE_NAME', 91)      # ""
 def_op('UNPACK_SEQUENCE', 92)   # Number of tuple items
-jrel_op('FOR_ITER', 93)
+jabs_op('FOR_ITER', 93)
 def_op('UNPACK_EX', 94)
 name_op('STORE_ATTR', 95)       # Index in name list
 name_op('DELETE_ATTR', 96)      # ""
@@ -159,7 +159,7 @@ jabs_op('POP_JUMP_IF_TRUE', 115)     # ""
 
 name_op('LOAD_GLOBAL', 116)     # Index in name list
 
-jrel_op('SETUP_FINALLY', 122)   # Distance to target address
+jabs_op('SETUP_FINALLY', 122)   # Distance to target address
 
 def_op('LOAD_FAST', 124)        # Local variable number
 haslocal.append(124)
@@ -184,7 +184,7 @@ hasfree.append(138)
 def_op('CALL_FUNCTION_KW', 141)  # #args + #kwargs
 def_op('CALL_FUNCTION_EX', 142)  # Flags
 
-jrel_op('SETUP_WITH', 143)
+jabs_op('SETUP_WITH', 143)
 
 def_op('LIST_APPEND', 145)
 def_op('SET_ADD', 146)
@@ -202,7 +202,7 @@ def_op('BUILD_MAP_UNPACK_WITH_CALL', 151)
 def_op('BUILD_TUPLE_UNPACK', 152)
 def_op('BUILD_SET_UNPACK', 153)
 
-jrel_op('SETUP_ASYNC_WITH', 154)
+jabs_op('SETUP_ASYNC_WITH', 154)
 
 def_op('FORMAT_VALUE', 155)
 def_op('BUILD_CONST_KEY_MAP', 156)
@@ -211,5 +211,7 @@ def_op('BUILD_TUPLE_UNPACK_WITH_CALL', 158)
 
 name_op('LOAD_METHOD', 160)
 def_op('CALL_METHOD', 161)
+
+
 
 del def_op, name_op, jrel_op, jabs_op

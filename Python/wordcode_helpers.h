@@ -25,6 +25,7 @@ static void
 write_op_arg(_Py_CODEUNIT *codestr, unsigned char opcode,
     unsigned int oparg, int ilen)
 {
+    assert(opcode);
     switch (ilen) {
         case 4:
             *codestr++ = PACKOPARG(EXTENDED_ARG, (oparg >> 24) & 0xff);
