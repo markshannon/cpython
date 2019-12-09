@@ -2980,6 +2980,7 @@ _PyBytes_Resize(PyObject **pv, Py_ssize_t newsize)
     sv->ob_shash = -1;          /* invalidate cached hash value */
     return 0;
 error:
+    assert(0);
     *pv = 0;
     Py_DECREF(v);
     PyErr_BadInternalCall();

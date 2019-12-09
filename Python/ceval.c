@@ -3531,6 +3531,7 @@ main_loop:
         _unknown_opcode:
 #endif
         default:
+            assert(0);
             fprintf(stderr,
                 "XXX lineno: %d, opcode: %d\n",
                 PyFrame_GetLineNumber(f),

@@ -317,10 +317,12 @@ PYTHON_OBJS=	\
 		Python/_warnings.o \
 		Python/Python-ast.o \
 		Python/asdl.o \
+		Python/assembler.o \
 		Python/ast.o \
 		Python/ast_opt.o \
 		Python/ast_unparse.o \
 		Python/bltinmodule.o \
+		Python/cfg.o \
 		Python/ceval.o \
 		Python/codecs.o \
 		Python/compile.o \
@@ -343,6 +345,7 @@ PYTHON_OBJS=	\
 		Python/modsupport.o \
 		Python/mysnprintf.o \
 		Python/mystrtoul.o \
+		Python/optimize.o \
 		Python/pathconfig.o \
 		Python/peephole.o \
 		Python/preconfig.o \

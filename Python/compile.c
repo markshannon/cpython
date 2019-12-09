@@ -1,3 +1,4 @@
+
 /*
  * This file compiles an abstract syntax tree (AST) into Python bytecode.
  *
@@ -29,7 +30,6 @@
 #include "code.h"
 #include "symtable.h"
 #include "opcode.h"
-#include "wordcode_helpers.h"
 
 #define DEFAULT_BLOCK_SIZE 16
 #define DEFAULT_BLOCKS 8
@@ -41,38 +41,23 @@
 #define COMP_SETCOMP  2
 #define COMP_DICTCOMP 3
 
-struct instr {
-    unsigned i_jabs : 1;
-    unsigned i_jrel : 1;
-    unsigned char i_opcode;
-    int i_oparg;
-    struct basicblock_ *i_target; /* target block (if jump instruction) */
-    int i_lineno;
+#include "cpython/cfg.h"
+
+enum label_state {
+    UNIITIALIZED = 0,
+    PENDING = 1,
+    EMITTED = 2
 };
 
-typedef struct basicblock_ {
-    /* Each basicblock in a compilation unit is linked via b_list in the
-       reverse order that the block are allocated.  b_list points to the next
-       block, not to be confused with b_next, which is next by control flow. */
-    struct basicblock_ *b_list;
-    /* number of instructions used */
-    int b_iused;
-    /* length of instruction array (b_instr) */
-    int b_ialloc;
-    /* pointer to an array of instructions, initially NULL */
-    struct instr *b_instr;
-    /* If b_next is non-NULL, it is a pointer to the next
-       block reached by normal control flow. */
-    struct basicblock_ *b_next;
-    /* b_seen is used to perform a DFS of basicblocks. */
-    unsigned b_seen : 1;
-    /* b_return is true if a RETURN_VALUE opcode is inserted. */
-    unsigned b_return : 1;
-    /* depth of stack upon entry of block, computed by stackdepth() */
-    int b_startdepth;
-    /* instruction offset for block, computed by assemble_jump_offsets() */
-    int b_offset;
-} basicblock;
+
+
+typedef struct label {
+    unsigned int l_index;
+    enum label_state l_state;
+} Label;
+
+
+#define LABEL(name) Label name = {0}
 
 /* fblockinfo tracks the current frame block.
 
@@ -86,9 +71,9 @@ enum fblocktype { WHILE_LOOP, FOR_LOOP, EXCEPT, FINALLY_TRY, FINALLY_END,
 
 struct fblockinfo {
     enum fblocktype fb_type;
-    basicblock *fb_block;
+    Label *fb_block;
     /* (optional) type-specific exit or cleanup block */
-    basicblock *fb_exit;
+    Label *fb_exit;
     /* (optional) additional information required for unwinding */
     void *fb_datum;
 };
@@ -127,10 +112,10 @@ struct compiler_unit {
     Py_ssize_t u_argcount;        /* number of arguments for block */
     Py_ssize_t u_posonlyargcount;        /* number of positional only arguments for block */
     Py_ssize_t u_kwonlyargcount; /* number of keyword only arguments for block */
-    /* Pointer to the most recently allocated block.  By following b_list
-       members, you can reach all early allocated blocks. */
-    basicblock *u_blocks;
-    basicblock *u_curblock; /* pointer to current block */
+    Instruction *u_instructions;
+    ControlFlowGraph *u_cfg;
+    int u_instruction_count;
+    int u_allocated_instructions;
 
     int u_nfblocks;
     struct fblockinfo u_fblock[CO_MAXBLOCKS];
@@ -138,9 +123,9 @@ struct compiler_unit {
     int u_firstlineno; /* the first lineno of the block */
     int u_lineno;          /* the lineno for the current stmt */
     int u_col_offset;      /* the offset of the current stmt */
-    int u_lineno_set;  /* boolean to indicate whether instr
-                          has been generated with current lineno */
 };
+
+
 
 /* This struct captures the global state of a compilation.
 
@@ -163,12 +148,6 @@ struct compiler {
     int c_optimize;              /* optimization level */
     int c_interactive;           /* true if in interactive mode */
     int c_nestlevel;
-    int c_do_not_emit_bytecode;  /* The compiler won't emit any bytecode
-                                    if this value is different from zero.
-                                    This can be used to temporarily visit
-                                    nodes without emitting bytecode to
-                                    check only errors. */
-
     PyObject *c_const_cache;     /* Python dict holding all constants,
                                     including names tuple */
     struct compiler_unit *u; /* compiler state for current block */
@@ -178,11 +157,11 @@ struct compiler {
 
 static int compiler_enter_scope(struct compiler *, identifier, int, void *, int);
 static void compiler_free(struct compiler *);
-static basicblock *compiler_new_block(struct compiler *);
-static int compiler_next_instr(struct compiler *, basicblock *);
+static int compiler_next_instr(struct compiler *);
 static int compiler_addop(struct compiler *, int);
 static int compiler_addop_i(struct compiler *, int, Py_ssize_t);
-static int compiler_addop_j(struct compiler *, int, basicblock *, int);
+static int compiler_addop_j(struct compiler *, int, Label *);
+static int compiler_addlabel(struct compiler *, Label *);
 static int compiler_error(struct compiler *, const char *);
 static int compiler_warn(struct compiler *, const char *, ...);
 static int compiler_nameop(struct compiler *, identifier, expr_context_ty);
@@ -198,7 +177,6 @@ static int compiler_visit_slice(struct compiler *, slice_ty,
 
 static int inplace_binop(struct compiler *, operator_ty);
 static int are_all_items_const(asdl_seq *, Py_ssize_t, Py_ssize_t);
-static int expr_constant(expr_ty);
 
 static int compiler_with(struct compiler *, stmt_ty, int);
 static int compiler_async_with(struct compiler *, stmt_ty, int);
@@ -219,7 +197,8 @@ static int compiler_async_comprehension_generator(
                                       asdl_seq *generators, int gen_index,
                                       expr_ty elt, expr_ty val, int type);
 
-static PyCodeObject *assemble(struct compiler *, int addNone);
+static PyCodeObject *make_code(struct compiler *);
+
 static PyObject *__doc__, *__annotations__;
 
 #define CAPSULE_NAME "compile.c compiler unit"
@@ -348,7 +327,6 @@ PyAST_CompileObject(mod_ty mod, PyObject *filename, PyCompilerFlags *flags,
     c.c_flags = flags;
     c.c_optimize = (optimize == -1) ? config->optimization_level : optimize;
     c.c_nestlevel = 0;
-    c.c_do_not_emit_bytecode = 0;
 
     if (!_PyAST_Optimize(mod, arena, c.c_optimize)) {
         goto finally;
@@ -368,6 +346,8 @@ PyAST_CompileObject(mod_ty mod, PyObject *filename, PyCompilerFlags *flags,
     assert(co || PyErr_Occurred());
     return co;
 }
+
+
 
 PyCodeObject *
 PyAST_CompileEx(mod_ty mod, const char *filename_str, PyCompilerFlags *flags,
@@ -503,37 +483,30 @@ dictbytype(PyObject *src, int scope_type, int flag, Py_ssize_t offset)
 static void
 compiler_unit_check(struct compiler_unit *u)
 {
-    basicblock *block;
-    for (block = u->u_blocks; block != NULL; block = block->b_list) {
-        assert((uintptr_t)block != 0xcbcbcbcbU);
-        assert((uintptr_t)block != 0xfbfbfbfbU);
-        assert((uintptr_t)block != 0xdbdbdbdbU);
-        if (block->b_instr != NULL) {
-            assert(block->b_ialloc > 0);
-            assert(block->b_iused > 0);
-            assert(block->b_ialloc >= block->b_iused);
-        }
-        else {
-            assert (block->b_iused == 0);
-            assert (block->b_ialloc == 0);
-        }
-    }
+    //To do...
+    //basicblock *block;
+    //for (block = u->u_blocks; block != NULL; block = block->b_list) {
+    //    assert((uintptr_t)block != 0xcbcbcbcbU);
+    //    assert((uintptr_t)block != 0xfbfbfbfbU);
+    //    assert((uintptr_t)block != 0xdbdbdbdbU);
+    //    if (block->b_instr != NULL) {
+    //        assert(block->b_ialloc > 0);
+    //        assert(block->b_iused > 0);
+    //        assert(block->b_ialloc >= block->b_iused);
+    //    }
+    //    else {
+    //        assert (block->b_iused == 0);
+    //        assert (block->b_ialloc == 0);
+    //    }
+    //}
 }
 
 static void
 compiler_unit_free(struct compiler_unit *u)
 {
-    basicblock *b, *next;
-
     compiler_unit_check(u);
-    b = u->u_blocks;
-    while (b != NULL) {
-        if (b->b_instr)
-            PyObject_Free((void *)b->b_instr);
-        next = b->b_list;
-        PyObject_Free((void *)b);
-        b = next;
-    }
+    _Py_FreeCfg(u->u_cfg);
+    u->u_cfg = NULL;
     Py_CLEAR(u->u_ste);
     Py_CLEAR(u->u_name);
     Py_CLEAR(u->u_qualname);
@@ -546,12 +519,12 @@ compiler_unit_free(struct compiler_unit *u)
     PyObject_Free(u);
 }
 
+
 static int
 compiler_enter_scope(struct compiler *c, identifier name,
                      int scope_type, void *key, int lineno)
 {
     struct compiler_unit *u;
-    basicblock *block;
 
     u = (struct compiler_unit *)PyObject_Malloc(sizeof(
                                             struct compiler_unit));
@@ -603,12 +576,11 @@ compiler_enter_scope(struct compiler *c, identifier name,
         return 0;
     }
 
-    u->u_blocks = NULL;
+    u->u_cfg = NULL;
     u->u_nfblocks = 0;
     u->u_firstlineno = lineno;
-    u->u_lineno = 0;
+    u->u_lineno = lineno;
     u->u_col_offset = 0;
-    u->u_lineno_set = 0;
     u->u_consts = PyDict_New();
     if (!u->u_consts) {
         compiler_unit_free(u);
@@ -621,6 +593,13 @@ compiler_enter_scope(struct compiler *c, identifier name,
     }
 
     u->u_private = NULL;
+    u->u_instruction_count = 0;
+    u->u_instructions = (Instruction *)
+        PyObject_Malloc(sizeof(Instruction) * DEFAULT_CODE_SIZE);
+    if (u->u_instructions == NULL) {
+        return 0;
+    }
+    u->u_allocated_instructions = DEFAULT_CODE_SIZE;
 
     /* Push the old compiler_unit on the stack. */
     if (c->u) {
@@ -637,11 +616,6 @@ compiler_enter_scope(struct compiler *c, identifier name,
     c->u = u;
 
     c->c_nestlevel++;
-
-    block = compiler_new_block(c);
-    if (block == NULL)
-        return 0;
-    c->u->u_curblock = block;
 
     if (u->u_scope_type != COMPILER_SCOPE_MODULE) {
         if (!compiler_set_qualname(c))
@@ -751,97 +725,42 @@ compiler_set_qualname(struct compiler *c)
     return 1;
 }
 
-
-/* Allocate a new block and return a pointer to it.
-   Returns NULL on error.
-*/
-
-static basicblock *
-compiler_new_block(struct compiler *c)
-{
-    basicblock *b;
-    struct compiler_unit *u;
-
-    u = c->u;
-    b = (basicblock *)PyObject_Malloc(sizeof(basicblock));
-    if (b == NULL) {
-        PyErr_NoMemory();
-        return NULL;
-    }
-    memset((void *)b, 0, sizeof(basicblock));
-    /* Extend the singly linked list of blocks with new block. */
-    b->b_list = u->u_blocks;
-    u->u_blocks = b;
-    return b;
+static inline Instruction *
+get_instruction(struct compiler *c, int index) {
+    assert(index >= 0);
+    assert(index < c->u->u_instruction_count);
+    return &c->u->u_instructions[index];
 }
 
-static basicblock *
-compiler_next_block(struct compiler *c)
-{
-    basicblock *block = compiler_new_block(c);
-    if (block == NULL)
-        return NULL;
-    c->u->u_curblock->b_next = block;
-    c->u->u_curblock = block;
-    return block;
-}
 
-static basicblock *
-compiler_use_next_block(struct compiler *c, basicblock *block)
-{
-    assert(block != NULL);
-    c->u->u_curblock->b_next = block;
-    c->u->u_curblock = block;
-    return block;
-}
+#define MAX_INSTRUCTIONS (1<<29)
 
-/* Returns the offset of the next instruction in the current block's
-   b_instr array.  Resizes the b_instr as necessary.
-   Returns -1 on failure.
-*/
-
+/* Returns the offset of the next instruction. 
+ * Resizes the instruction array as necessary.
+ * Returns -1 on failure.
+ */
 static int
-compiler_next_instr(struct compiler *c, basicblock *b)
+compiler_next_instr(struct compiler *c)
 {
-    assert(b != NULL);
-    if (b->b_instr == NULL) {
-        b->b_instr = (struct instr *)PyObject_Malloc(
-                         sizeof(struct instr) * DEFAULT_BLOCK_SIZE);
-        if (b->b_instr == NULL) {
-            PyErr_NoMemory();
-            return -1;
-        }
-        b->b_ialloc = DEFAULT_BLOCK_SIZE;
-        memset((char *)b->b_instr, 0,
-               sizeof(struct instr) * DEFAULT_BLOCK_SIZE);
+    if (c->u->u_instruction_count < c->u->u_allocated_instructions) {
+        return c->u->u_instruction_count++;
     }
-    else if (b->b_iused == b->b_ialloc) {
-        struct instr *tmp;
-        size_t oldsize, newsize;
-        oldsize = b->b_ialloc * sizeof(struct instr);
-        newsize = oldsize << 1;
-
-        if (oldsize > (SIZE_MAX >> 1)) {
-            PyErr_NoMemory();
-            return -1;
-        }
-
-        if (newsize == 0) {
-            PyErr_NoMemory();
-            return -1;
-        }
-        b->b_ialloc <<= 1;
-        tmp = (struct instr *)PyObject_Realloc(
-                                        (void *)b->b_instr, newsize);
-        if (tmp == NULL) {
-            PyErr_NoMemory();
-            return -1;
-        }
-        b->b_instr = tmp;
-        memset((char *)b->b_instr + oldsize, 0, newsize - oldsize);
+    int to_allocate = c->u->u_allocated_instructions*2;
+    if (to_allocate > MAX_INSTRUCTIONS) {
+        PyErr_NoMemory();
+        return -1;
     }
-    return b->b_iused++;
+    Instruction *tmp = 
+        PyObject_Realloc(c->u->u_instructions, sizeof(Instruction) * to_allocate);
+    if (tmp == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    c->u->u_allocated_instructions = to_allocate;
+    c->u->u_instructions = tmp;
+    return c->u->u_instruction_count++;
 }
+
 
 /* Set the i_lineno member of the instruction at offset off if the
    line number for the current expression/statement has not
@@ -858,310 +777,31 @@ compiler_next_instr(struct compiler *c, basicblock *b)
 static void
 compiler_set_lineno(struct compiler *c, int off)
 {
-    basicblock *b;
-    if (c->u->u_lineno_set)
-        return;
-    c->u->u_lineno_set = 1;
-    b = c->u->u_curblock;
-    b->b_instr[off].i_lineno = c->u->u_lineno;
+    assert(c->u->u_lineno >= 0);
+    get_instruction(c, off)->i_lineno = c->u->u_lineno;
 }
 
-/* Return the stack effect of opcode with argument oparg.
-
-   Some opcodes have different stack effect when jump to the target and
-   when not jump. The 'jump' parameter specifies the case:
-
-   * 0 -- when not jump
-   * 1 -- when jump
-   * -1 -- maximal
- */
-/* XXX Make the stack effect of WITH_CLEANUP_START and
-   WITH_CLEANUP_FINISH deterministic. */
-static int
-stack_effect(int opcode, int oparg, int jump)
-{
-    switch (opcode) {
-        case NOP:
-        case EXTENDED_ARG:
-            return 0;
-
-        /* Stack manipulation */
-        case POP_TOP:
-            return -1;
-        case ROT_TWO:
-        case ROT_THREE:
-        case ROT_FOUR:
-            return 0;
-        case DUP_TOP:
-            return 1;
-        case DUP_TOP_TWO:
-            return 2;
-
-        /* Unary operators */
-        case UNARY_POSITIVE:
-        case UNARY_NEGATIVE:
-        case UNARY_NOT:
-        case UNARY_INVERT:
-            return 0;
-
-        case SET_ADD:
-        case LIST_APPEND:
-            return -1;
-        case MAP_ADD:
-            return -2;
-
-        /* Binary operators */
-        case BINARY_POWER:
-        case BINARY_MULTIPLY:
-        case BINARY_MATRIX_MULTIPLY:
-        case BINARY_MODULO:
-        case BINARY_ADD:
-        case BINARY_SUBTRACT:
-        case BINARY_SUBSCR:
-        case BINARY_FLOOR_DIVIDE:
-        case BINARY_TRUE_DIVIDE:
-            return -1;
-        case INPLACE_FLOOR_DIVIDE:
-        case INPLACE_TRUE_DIVIDE:
-            return -1;
-
-        case INPLACE_ADD:
-        case INPLACE_SUBTRACT:
-        case INPLACE_MULTIPLY:
-        case INPLACE_MATRIX_MULTIPLY:
-        case INPLACE_MODULO:
-            return -1;
-        case STORE_SUBSCR:
-            return -3;
-        case DELETE_SUBSCR:
-            return -2;
-
-        case BINARY_LSHIFT:
-        case BINARY_RSHIFT:
-        case BINARY_AND:
-        case BINARY_XOR:
-        case BINARY_OR:
-            return -1;
-        case INPLACE_POWER:
-            return -1;
-        case GET_ITER:
-            return 0;
-
-        case PRINT_EXPR:
-            return -1;
-        case LOAD_BUILD_CLASS:
-            return 1;
-        case INPLACE_LSHIFT:
-        case INPLACE_RSHIFT:
-        case INPLACE_AND:
-        case INPLACE_XOR:
-        case INPLACE_OR:
-            return -1;
-
-        case SETUP_WITH:
-            /* 1 in the normal flow.
-             * Restore the stack position and push 6 values before jumping to
-             * the handler if an exception be raised. */
-            return jump ? 6 : 1;
-        case RETURN_VALUE:
-            return -1;
-        case IMPORT_STAR:
-            return -1;
-        case SETUP_ANNOTATIONS:
-            return 0;
-        case YIELD_VALUE:
-            return 0;
-        case YIELD_FROM:
-            return -1;
-        case POP_BLOCK:
-            return 0;
-        case POP_EXCEPT:
-            return -3;
-
-        case STORE_NAME:
-            return -1;
-        case DELETE_NAME:
-            return 0;
-        case UNPACK_SEQUENCE:
-            return oparg-1;
-        case UNPACK_EX:
-            return (oparg&0xFF) + (oparg>>8);
-        case FOR_ITER:
-            /* -1 at end of iterator, 1 if continue iterating. */
-            return jump > 0 ? -1 : 1;
-
-        case STORE_ATTR:
-            return -2;
-        case DELETE_ATTR:
-            return -1;
-        case STORE_GLOBAL:
-            return -1;
-        case DELETE_GLOBAL:
-            return 0;
-        case LOAD_CONST:
-            return 1;
-        case LOAD_NAME:
-            return 1;
-        case BUILD_TUPLE:
-        case BUILD_LIST:
-        case BUILD_SET:
-        case BUILD_STRING:
-            return 1-oparg;
-        case BUILD_LIST_UNPACK:
-        case BUILD_TUPLE_UNPACK:
-        case BUILD_TUPLE_UNPACK_WITH_CALL:
-        case BUILD_SET_UNPACK:
-        case BUILD_MAP_UNPACK:
-        case BUILD_MAP_UNPACK_WITH_CALL:
-            return 1 - oparg;
-        case BUILD_MAP:
-            return 1 - 2*oparg;
-        case BUILD_CONST_KEY_MAP:
-            return -oparg;
-        case LOAD_ATTR:
-            return 0;
-        case COMPARE_OP:
-            return -1;
-        case IMPORT_NAME:
-            return -1;
-        case IMPORT_FROM:
-            return 1;
-
-        /* Jumps */
-        case JUMP_FORWARD:
-        case JUMP_ABSOLUTE:
-            return 0;
-
-        case JUMP_IF_TRUE_OR_POP:
-        case JUMP_IF_FALSE_OR_POP:
-            return jump ? 0 : -1;
-
-        case POP_JUMP_IF_FALSE:
-        case POP_JUMP_IF_TRUE:
-            return -1;
-
-        case LOAD_GLOBAL:
-            return 1;
-
-        /* Exception handling */
-        case SETUP_FINALLY:
-            /* 0 in the normal flow.
-             * Restore the stack position and push 6 values before jumping to
-             * the handler if an exception be raised. */
-            return jump ? 6 : 0;
-        case RERAISE:
-            return -3;
-
-        case WITH_EXCEPT_START:
-            return 1;
-
-        case LOAD_FAST:
-            return 1;
-        case STORE_FAST:
-            return -1;
-        case DELETE_FAST:
-            return 0;
-
-        case RAISE_VARARGS:
-            return -oparg;
-
-        /* Functions and calls */
-        case CALL_FUNCTION:
-            return -oparg;
-        case CALL_METHOD:
-            return -oparg-1;
-        case CALL_FUNCTION_KW:
-            return -oparg-1;
-        case CALL_FUNCTION_EX:
-            return -1 - ((oparg & 0x01) != 0);
-        case MAKE_FUNCTION:
-            return -1 - ((oparg & 0x01) != 0) - ((oparg & 0x02) != 0) -
-                ((oparg & 0x04) != 0) - ((oparg & 0x08) != 0);
-        case BUILD_SLICE:
-            if (oparg == 3)
-                return -2;
-            else
-                return -1;
-
-        /* Closures */
-        case LOAD_CLOSURE:
-            return 1;
-        case LOAD_DEREF:
-        case LOAD_CLASSDEREF:
-            return 1;
-        case STORE_DEREF:
-            return -1;
-        case DELETE_DEREF:
-            return 0;
-
-        /* Iterators and generators */
-        case GET_AWAITABLE:
-            return 0;
-        case SETUP_ASYNC_WITH:
-            /* 0 in the normal flow.
-             * Restore the stack position to the position before the result
-             * of __aenter__ and push 6 values before jumping to the handler
-             * if an exception be raised. */
-            return jump ? -1 + 6 : 0;
-        case BEFORE_ASYNC_WITH:
-            return 1;
-        case GET_AITER:
-            return 0;
-        case GET_ANEXT:
-            return 1;
-        case GET_YIELD_FROM_ITER:
-            return 0;
-        case END_ASYNC_FOR:
-            return -7;
-        case FORMAT_VALUE:
-            /* If there's a fmt_spec on the stack, we go from 2->1,
-               else 1->1. */
-            return (oparg & FVS_MASK) == FVS_HAVE_SPEC ? -1 : 0;
-        case LOAD_METHOD:
-            return 1;
-        case LOAD_ASSERTION_ERROR:
-            return 1;
-        default:
-            return PY_INVALID_STACK_EFFECT;
-    }
-    return PY_INVALID_STACK_EFFECT; /* not reachable */
-}
-
-int
-PyCompile_OpcodeStackEffectWithJump(int opcode, int oparg, int jump)
-{
-    return stack_effect(opcode, oparg, jump);
-}
-
-int
-PyCompile_OpcodeStackEffect(int opcode, int oparg)
-{
-    return stack_effect(opcode, oparg, -1);
-}
 
 /* Add an opcode with no argument.
    Returns 0 on failure, 1 on success.
 */
-
 static int
 compiler_addop(struct compiler *c, int opcode)
 {
-    basicblock *b;
-    struct instr *i;
+    Instruction *i;
     int off;
     assert(!HAS_ARG(opcode));
-    if (c->c_do_not_emit_bytecode) {
-        return 1;
-    }
-    off = compiler_next_instr(c, c->u->u_curblock);
+    off = compiler_next_instr(c);
     if (off < 0)
         return 0;
-    b = c->u->u_curblock;
-    i = &b->b_instr[off];
+    i = get_instruction(c, off);
     i->i_opcode = opcode;
     i->i_oparg = 0;
-    if (opcode == RETURN_VALUE)
-        b->b_return = 1;
+    if (opcode == RETURN_VALUE || opcode == RERAISE) {
+        i->i_flags = INSTRUCTION_IS_TERMINATOR;
+    } else {
+        i->i_flags = 0;
+    }
     compiler_set_lineno(c, off);
     return 1;
 }
@@ -1306,10 +946,6 @@ merge_consts_recursive(struct compiler *c, PyObject *o)
 static Py_ssize_t
 compiler_add_const(struct compiler *c, PyObject *o)
 {
-    if (c->c_do_not_emit_bytecode) {
-        return 0;
-    }
-
     PyObject *key = merge_consts_recursive(c, o);
     if (key == NULL) {
         return -1;
@@ -1323,10 +959,6 @@ compiler_add_const(struct compiler *c, PyObject *o)
 static int
 compiler_addop_load_const(struct compiler *c, PyObject *o)
 {
-    if (c->c_do_not_emit_bytecode) {
-        return 1;
-    }
-
     Py_ssize_t arg = compiler_add_const(c, o);
     if (arg < 0)
         return 0;
@@ -1337,10 +969,6 @@ static int
 compiler_addop_o(struct compiler *c, int opcode, PyObject *dict,
                      PyObject *o)
 {
-    if (c->c_do_not_emit_bytecode) {
-        return 1;
-    }
-
     Py_ssize_t arg = compiler_add_o(c, dict, o);
     if (arg < 0)
         return 0;
@@ -1352,10 +980,6 @@ compiler_addop_name(struct compiler *c, int opcode, PyObject *dict,
                     PyObject *o)
 {
     Py_ssize_t arg;
-
-    if (c->c_do_not_emit_bytecode) {
-        return 1;
-    }
 
     PyObject *mangled = _Py_Mangle(c->u->u_private, o);
     if (!mangled)
@@ -1374,12 +998,8 @@ compiler_addop_name(struct compiler *c, int opcode, PyObject *dict,
 static int
 compiler_addop_i(struct compiler *c, int opcode, Py_ssize_t oparg)
 {
-    struct instr *i;
+    Instruction *i;
     int off;
-
-    if (c->c_do_not_emit_bytecode) {
-        return 1;
-    }
 
     /* oparg value is unsigned, but a signed C int is usually used to store
        it in the C code (like Python/ceval.c).
@@ -1391,51 +1011,93 @@ compiler_addop_i(struct compiler *c, int opcode, Py_ssize_t oparg)
     assert(HAS_ARG(opcode));
     assert(0 <= oparg && oparg <= 2147483647);
 
-    off = compiler_next_instr(c, c->u->u_curblock);
+    off = compiler_next_instr(c);
     if (off < 0)
         return 0;
-    i = &c->u->u_curblock->b_instr[off];
+    i = get_instruction(c, off);
     i->i_opcode = opcode;
+    if (opcode == RAISE_VARARGS) {
+        i->i_flags = INSTRUCTION_IS_TERMINATOR;
+    } else {
+        i->i_flags = 0;
+    }
     i->i_oparg = Py_SAFE_DOWNCAST(oparg, Py_ssize_t, int);
     compiler_set_lineno(c, off);
     return 1;
 }
 
+
+/** When adding a jump to a label that hasn't been emitted,
+ * we form a linked list of jumps rooted in that label.
+ * When the label is emitted, the jumps can be fixed to point at the 
+ * address of the label
+ */
+
 static int
-compiler_addop_j(struct compiler *c, int opcode, basicblock *b, int absolute)
+compiler_addop_j(struct compiler *c, int opcode, Label *label)
 {
-    struct instr *i;
+    Instruction *i;
     int off;
 
-    if (c->c_do_not_emit_bytecode) {
-        return 1;
-    }
-
     assert(HAS_ARG(opcode));
-    assert(b != NULL);
-    off = compiler_next_instr(c, c->u->u_curblock);
+    off = compiler_next_instr(c);
     if (off < 0)
         return 0;
-    i = &c->u->u_curblock->b_instr[off];
+    i = get_instruction(c, off);
     i->i_opcode = opcode;
-    i->i_target = b;
-    if (absolute)
-        i->i_jabs = 1;
-    else
-        i->i_jrel = 1;
+    int flags;
+    switch(opcode) {
+        case JUMP_ABSOLUTE:
+            flags = INSTRUCTION_IS_TERMINATOR | INSTRUCTION_IS_BRANCH;
+            break;
+        default:
+            flags = INSTRUCTION_IS_BRANCH;
+    }
+    i->i_flags = flags;
+    switch(label->l_state) {
+        case UNIITIALIZED:
+            i->i_flags |= INSTRUCTION_END_OF_JUMP_LIST;
+            label->l_index = off;
+            label->l_state = PENDING;
+            break;
+        case PENDING:
+            i->i_oparg = label->l_index;
+            label->l_index = off;
+            break;
+        case EMITTED:
+            i->i_oparg = label->l_index;
+            break;
+    }
     compiler_set_lineno(c, off);
     return 1;
 }
 
-/* NEXT_BLOCK() creates an implicit jump from the current block
-   to the new block.
-
-   The returns inside this macro make it impossible to decref objects
-   created in the local function. Local objects should use the arena.
-*/
-#define NEXT_BLOCK(C) { \
-    if (compiler_next_block((C)) == NULL) \
-        return 0; \
+static int
+compiler_addlabel(struct compiler *c, Label *label)
+{
+    int off = c->u->u_instruction_count;
+    switch(label->l_state) {
+        case UNIITIALIZED:
+            label->l_index = off;
+            label->l_state = EMITTED;
+            break;
+        case PENDING: {
+            int index = label->l_index;
+            Instruction *jump;
+            do {
+                jump = get_instruction(c, index);
+                index = jump->i_oparg;
+                jump->i_oparg = off;
+            } while ((jump->i_flags & INSTRUCTION_END_OF_JUMP_LIST) == 0);
+            label->l_index = off;
+            label->l_state = EMITTED;
+            break;
+        }
+        case EMITTED:
+            /* Should never emit the same label twice */
+            return 0;
+    }
+    return 1;
 }
 
 #define ADDOP(C, OP) { \
@@ -1492,13 +1154,13 @@ compiler_addop_j(struct compiler *c, int opcode, basicblock *b, int absolute)
         return 0; \
 }
 
-#define ADDOP_JABS(C, OP, O) { \
-    if (!compiler_addop_j((C), (OP), (O), 1)) \
+#define ADDOP_JUMP(C, OP, L) { \
+    if (!compiler_addop_j((C), (OP), (L))) \
         return 0; \
 }
 
-#define ADDOP_JREL(C, OP, O) { \
-    if (!compiler_addop_j((C), (OP), (O), 0)) \
+#define ADD_LABEL(C, L) { \
+    if (!compiler_addlabel((C), &L)) \
         return 0; \
 }
 
@@ -1543,17 +1205,6 @@ compiler_addop_j(struct compiler *c, int opcode, basicblock *b, int absolute)
             return 0; \
         } \
     } \
-}
-
-/* These macros allows to check only for errors and not emmit bytecode
- * while visiting nodes.
-*/
-
-#define BEGIN_DO_NOT_EMIT_BYTECODE { \
-    c->c_do_not_emit_bytecode++;
-
-#define END_DO_NOT_EMIT_BYTECODE \
-    c->c_do_not_emit_bytecode--; \
 }
 
 /* Search if variable annotations are present statically in a block. */
@@ -1613,13 +1264,14 @@ find_ann(asdl_seq *stmts)
     return res;
 }
 
+
 /*
  * Frame block handling functions
  */
 
 static int
-compiler_push_fblock(struct compiler *c, enum fblocktype t, basicblock *b,
-                     basicblock *exit, void *datum)
+compiler_push_fblock(struct compiler *c, enum fblocktype t, Label *block,
+                     Label *exit, void *datum)
 {
     struct fblockinfo *f;
     if (c->u->u_nfblocks >= CO_MAXBLOCKS) {
@@ -1629,20 +1281,20 @@ compiler_push_fblock(struct compiler *c, enum fblocktype t, basicblock *b,
     }
     f = &c->u->u_fblock[c->u->u_nfblocks++];
     f->fb_type = t;
-    f->fb_block = b;
+    f->fb_block = block;
     f->fb_exit = exit;
     f->fb_datum = datum;
     return 1;
 }
 
 static void
-compiler_pop_fblock(struct compiler *c, enum fblocktype t, basicblock *b)
+compiler_pop_fblock(struct compiler *c, enum fblocktype t, Label *block)
 {
     struct compiler_unit *u = c->u;
     assert(u->u_nfblocks > 0);
     u->u_nfblocks--;
     assert(u->u_fblock[u->u_nfblocks].fb_type == t);
-    assert(u->u_fblock[u->u_nfblocks].fb_block == b);
+    assert(u->u_fblock[u->u_nfblocks].fb_block == block);
 }
 
 static int
@@ -1653,6 +1305,7 @@ compiler_call_exit_with_nones(struct compiler *c) {
     ADDOP_I(c, CALL_FUNCTION, 3);
     return 1;
 }
+
 
 /* Unwind a frame block.  If preserve_tos is true, the TOS before
  * popping the blocks will be restored afterwards, unless another
@@ -1813,6 +1466,8 @@ compiler_body(struct compiler *c, asdl_seq *stmts)
     return 1;
 }
 
+
+
 static PyCodeObject *
 compiler_mod(struct compiler *c, mod_ty mod)
 {
@@ -1824,7 +1479,7 @@ compiler_mod(struct compiler *c, mod_ty mod)
         if (!module)
             return NULL;
     }
-    /* Use 0 for firstlineno initially, will fixup in assemble(). */
+    /* Passing 0 for firstlineno will cause the lineno in the sybol table to be used. */
     if (!compiler_enter_scope(c, module, COMPILER_SCOPE_MODULE, mod, 0))
         return NULL;
     switch (mod->kind) {
@@ -1856,7 +1511,11 @@ compiler_mod(struct compiler *c, mod_ty mod)
                      mod->kind);
         return 0;
     }
-    co = assemble(c, addNone);
+    if (addNone) {
+        ADDOP_LOAD_CONST(c, Py_None);
+    }
+    ADDOP(c, RETURN_VALUE);
+    co = make_code(c);
     compiler_exit_scope(c);
     return co;
 }
@@ -1891,6 +1550,12 @@ get_ref_type(struct compiler *c, PyObject *name)
 
     return scope;
 }
+
+
+
+
+
+
 
 static int
 compiler_lookup_arg(PyObject *dict, PyObject *name)
@@ -2135,6 +1800,7 @@ compiler_visit_defaults(struct compiler *c, arguments_ty args)
     return 1;
 }
 
+
 static Py_ssize_t
 compiler_default_arguments(struct compiler *c, arguments_ty args)
 {
@@ -2232,7 +1898,10 @@ compiler_function(struct compiler *c, stmt_ty s, int is_async)
     c->u->u_posonlyargcount = asdl_seq_LEN(args->posonlyargs);
     c->u->u_kwonlyargcount = asdl_seq_LEN(args->kwonlyargs);
     VISIT_SEQ_IN_SCOPE(c, stmt, body);
-    co = assemble(c, 1);
+    /* Ensure that body is terminated properly */
+    ADDOP_LOAD_CONST(c, Py_None);
+    ADDOP(c, RETURN_VALUE);
+    co = make_code(c);
     qualname = c->u->u_qualname;
     Py_INCREF(qualname);
     compiler_exit_scope(c);
@@ -2354,7 +2023,7 @@ compiler_class(struct compiler *c, stmt_ty s)
         }
         ADDOP_IN_SCOPE(c, RETURN_VALUE);
         /* create the code object */
-        co = assemble(c, 1);
+        co = make_code(c);
     }
     /* leave the new scope */
     compiler_exit_scope(c);
@@ -2387,6 +2056,7 @@ compiler_class(struct compiler *c, stmt_ty s)
         return 0;
     return 1;
 }
+
 
 /* Return 0 if the expression is a constant value except named singletons.
    Return 1 otherwise. */
@@ -2459,7 +2129,7 @@ cmpop(cmpop_ty op)
 }
 
 static int
-compiler_jump_if(struct compiler *c, expr_ty e, basicblock *next, int cond)
+compiler_jump_if(struct compiler *c, expr_ty e, Label *next, int cond)
 {
     switch (e->kind) {
     case UnaryOp_kind:
@@ -2472,11 +2142,10 @@ compiler_jump_if(struct compiler *c, expr_ty e, basicblock *next, int cond)
         Py_ssize_t i, n = asdl_seq_LEN(s) - 1;
         assert(n >= 0);
         int cond2 = e->v.BoolOp.op == Or;
-        basicblock *next2 = next;
+        LABEL(alt);
+        Label *next2 = next;
         if (!cond2 != !cond) {
-            next2 = compiler_new_block(c);
-            if (next2 == NULL)
-                return 0;
+            next2 = &alt;
         }
         for (i = 0; i < n; ++i) {
             if (!compiler_jump_if(c, (expr_ty)asdl_seq_GET(s, i), next2, cond2))
@@ -2484,27 +2153,23 @@ compiler_jump_if(struct compiler *c, expr_ty e, basicblock *next, int cond)
         }
         if (!compiler_jump_if(c, (expr_ty)asdl_seq_GET(s, n), next, cond))
             return 0;
-        if (next2 != next)
-            compiler_use_next_block(c, next2);
+        if (next2 != next) {
+            ADD_LABEL(c, alt);
+        }
         return 1;
     }
     case IfExp_kind: {
-        basicblock *end, *next2;
-        end = compiler_new_block(c);
-        if (end == NULL)
-            return 0;
-        next2 = compiler_new_block(c);
-        if (next2 == NULL)
-            return 0;
-        if (!compiler_jump_if(c, e->v.IfExp.test, next2, 0))
+        LABEL(end);
+        LABEL(next2);
+        if (!compiler_jump_if(c, e->v.IfExp.test, &next2, 0))
             return 0;
         if (!compiler_jump_if(c, e->v.IfExp.body, next, cond))
             return 0;
-        ADDOP_JREL(c, JUMP_FORWARD, end);
-        compiler_use_next_block(c, next2);
+        ADDOP_JUMP(c, JUMP_ABSOLUTE, &end);
+        ADD_LABEL(c, next2);
         if (!compiler_jump_if(c, e->v.IfExp.orelse, next, cond))
             return 0;
-        compiler_use_next_block(c, end);
+        ADD_LABEL(c, end);
         return 1;
     }
     case Compare_kind: {
@@ -2513,9 +2178,7 @@ compiler_jump_if(struct compiler *c, expr_ty e, basicblock *next, int cond)
             if (!check_compare(c, e)) {
                 return 0;
             }
-            basicblock *cleanup = compiler_new_block(c);
-            if (cleanup == NULL)
-                return 0;
+            LABEL(cleanup);
             VISIT(c, expr, e->v.Compare.left);
             for (i = 0; i < n; i++) {
                 VISIT(c, expr,
@@ -2524,23 +2187,21 @@ compiler_jump_if(struct compiler *c, expr_ty e, basicblock *next, int cond)
                 ADDOP(c, ROT_THREE);
                 ADDOP_I(c, COMPARE_OP,
                     cmpop((cmpop_ty)(asdl_seq_GET(e->v.Compare.ops, i))));
-                ADDOP_JABS(c, POP_JUMP_IF_FALSE, cleanup);
-                NEXT_BLOCK(c);
+                ADDOP_JUMP(c, POP_JUMP_IF_FALSE, &cleanup);
             }
             VISIT(c, expr, (expr_ty)asdl_seq_GET(e->v.Compare.comparators, n));
             ADDOP_I(c, COMPARE_OP,
                    cmpop((cmpop_ty)(asdl_seq_GET(e->v.Compare.ops, n))));
-            ADDOP_JABS(c, cond ? POP_JUMP_IF_TRUE : POP_JUMP_IF_FALSE, next);
-            basicblock *end = compiler_new_block(c);
-            if (end == NULL)
-                return 0;
-            ADDOP_JREL(c, JUMP_FORWARD, end);
-            compiler_use_next_block(c, cleanup);
+            
+            ADDOP_JUMP(c, cond ? POP_JUMP_IF_TRUE : POP_JUMP_IF_FALSE, next);
+            LABEL(end);
+            ADDOP_JUMP(c, JUMP_ABSOLUTE, &end);
+            ADD_LABEL(c, cleanup);
             ADDOP(c, POP_TOP);
             if (!cond) {
-                ADDOP_JREL(c, JUMP_FORWARD, next);
+                ADDOP_JUMP(c, JUMP_ABSOLUTE, next);
             }
-            compiler_use_next_block(c, end);
+            ADD_LABEL(c, end);
             return 1;
         }
         /* fallback to general implementation */
@@ -2553,29 +2214,24 @@ compiler_jump_if(struct compiler *c, expr_ty e, basicblock *next, int cond)
 
     /* general implementation */
     VISIT(c, expr, e);
-    ADDOP_JABS(c, cond ? POP_JUMP_IF_TRUE : POP_JUMP_IF_FALSE, next);
+    ADDOP_JUMP(c, cond ? POP_JUMP_IF_TRUE : POP_JUMP_IF_FALSE, next);
     return 1;
 }
+
 
 static int
 compiler_ifexp(struct compiler *c, expr_ty e)
 {
-    basicblock *end, *next;
-
+    LABEL(end);
+    LABEL(next);
     assert(e->kind == IfExp_kind);
-    end = compiler_new_block(c);
-    if (end == NULL)
-        return 0;
-    next = compiler_new_block(c);
-    if (next == NULL)
-        return 0;
-    if (!compiler_jump_if(c, e->v.IfExp.test, next, 0))
+    if (!compiler_jump_if(c, e->v.IfExp.test, &next, 0))
         return 0;
     VISIT(c, expr, e->v.IfExp.body);
-    ADDOP_JREL(c, JUMP_FORWARD, end);
-    compiler_use_next_block(c, next);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &end);
+    ADD_LABEL(c, next);
     VISIT(c, expr, e->v.IfExp.orelse);
-    compiler_use_next_block(c, end);
+    ADD_LABEL(c, end);
     return 1;
 }
 
@@ -2613,13 +2269,8 @@ compiler_lambda(struct compiler *c, expr_ty e)
     c->u->u_posonlyargcount = asdl_seq_LEN(args->posonlyargs);
     c->u->u_kwonlyargcount = asdl_seq_LEN(args->kwonlyargs);
     VISIT_IN_SCOPE(c, expr, e->v.Lambda.body);
-    if (c->u->u_ste->ste_generator) {
-        co = assemble(c, 0);
-    }
-    else {
-        ADDOP_IN_SCOPE(c, RETURN_VALUE);
-        co = assemble(c, 1);
-    }
+    ADDOP_IN_SCOPE(c, RETURN_VALUE);
+    co = make_code(c);
     qualname = c->u->u_qualname;
     Py_INCREF(qualname);
     compiler_exit_scope(c);
@@ -2633,114 +2284,75 @@ compiler_lambda(struct compiler *c, expr_ty e)
     return 1;
 }
 
+
+
 static int
 compiler_if(struct compiler *c, stmt_ty s)
 {
-    basicblock *end, *next;
-    int constant;
+    LABEL(end);
+    LABEL(next);
     assert(s->kind == If_kind);
-    end = compiler_new_block(c);
-    if (end == NULL)
-        return 0;
 
-    constant = expr_constant(s->v.If.test);
-    /* constant = 0: "if 0"
-     * constant = 1: "if 1", "if 2", ...
-     * constant = -1: rest */
-    if (constant == 0) {
-        BEGIN_DO_NOT_EMIT_BYTECODE
-        VISIT_SEQ(c, stmt, s->v.If.body);
-        END_DO_NOT_EMIT_BYTECODE
-        if (s->v.If.orelse) {
-            VISIT_SEQ(c, stmt, s->v.If.orelse);
-        }
-    } else if (constant == 1) {
-        VISIT_SEQ(c, stmt, s->v.If.body);
-        if (s->v.If.orelse) {
-            BEGIN_DO_NOT_EMIT_BYTECODE
-            VISIT_SEQ(c, stmt, s->v.If.orelse);
-            END_DO_NOT_EMIT_BYTECODE
-        }
-    } else {
-        if (asdl_seq_LEN(s->v.If.orelse)) {
-            next = compiler_new_block(c);
-            if (next == NULL)
-                return 0;
-        }
-        else {
-            next = end;
-        }
-        if (!compiler_jump_if(c, s->v.If.test, next, 0)) {
-            return 0;
-        }
-        VISIT_SEQ(c, stmt, s->v.If.body);
-        if (asdl_seq_LEN(s->v.If.orelse)) {
-            ADDOP_JREL(c, JUMP_FORWARD, end);
-            compiler_use_next_block(c, next);
-            VISIT_SEQ(c, stmt, s->v.If.orelse);
-        }
+    Label *target = asdl_seq_LEN(s->v.If.orelse) ? &next : &end;
+    if (!compiler_jump_if(c, s->v.If.test, target, 0)) {
+        return 0;
     }
-    compiler_use_next_block(c, end);
+    VISIT_SEQ(c, stmt, s->v.If.body);
+    if (asdl_seq_LEN(s->v.If.orelse)) {
+        ADDOP_JUMP(c, JUMP_ABSOLUTE, &end);
+        ADD_LABEL(c, next);
+        VISIT_SEQ(c, stmt, s->v.If.orelse);
+    }
+    ADD_LABEL(c, end);
     return 1;
 }
 
 static int
 compiler_for(struct compiler *c, stmt_ty s)
 {
-    basicblock *start, *cleanup, *end;
-
-    start = compiler_new_block(c);
-    cleanup = compiler_new_block(c);
-    end = compiler_new_block(c);
-    if (start == NULL || end == NULL || cleanup == NULL) {
-        return 0;
-    }
-    if (!compiler_push_fblock(c, FOR_LOOP, start, end, NULL)) {
+    LABEL(start);
+    LABEL(cleanup);
+    LABEL(end);
+    if (!compiler_push_fblock(c, FOR_LOOP, &start, &end, NULL)) {
         return 0;
     }
     VISIT(c, expr, s->v.For.iter);
     ADDOP(c, GET_ITER);
-    compiler_use_next_block(c, start);
-    ADDOP_JREL(c, FOR_ITER, cleanup);
+    ADD_LABEL(c, start);
+    ADDOP_JUMP(c, FOR_ITER, &cleanup);
     VISIT(c, expr, s->v.For.target);
     VISIT_SEQ(c, stmt, s->v.For.body);
-    ADDOP_JABS(c, JUMP_ABSOLUTE, start);
-    compiler_use_next_block(c, cleanup);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &start);
+    ADD_LABEL(c, cleanup);
 
-    compiler_pop_fblock(c, FOR_LOOP, start);
+    compiler_pop_fblock(c, FOR_LOOP, &start);
 
     VISIT_SEQ(c, stmt, s->v.For.orelse);
-    compiler_use_next_block(c, end);
+    ADD_LABEL(c, end);
     return 1;
 }
-
 
 static int
 compiler_async_for(struct compiler *c, stmt_ty s)
 {
-    basicblock *start, *except, *end;
+    LABEL(start);
+    LABEL(except);
+    LABEL(end);
     if (c->c_flags->cf_flags & PyCF_ALLOW_TOP_LEVEL_AWAIT){
         c->u->u_ste->ste_coroutine = 1;
     } else if (c->u->u_scope_type != COMPILER_SCOPE_ASYNC_FUNCTION) {
         return compiler_error(c, "'async for' outside async function");
     }
-
-    start = compiler_new_block(c);
-    except = compiler_new_block(c);
-    end = compiler_new_block(c);
-
-    if (start == NULL || except == NULL || end == NULL) {
-        return 0;
-    }
+    
     VISIT(c, expr, s->v.AsyncFor.iter);
     ADDOP(c, GET_AITER);
 
-    compiler_use_next_block(c, start);
-    if (!compiler_push_fblock(c, FOR_LOOP, start, end, NULL)) {
+    ADD_LABEL(c, start);
+    if (!compiler_push_fblock(c, FOR_LOOP, &start, &end, NULL)) {
         return 0;
     }
     /* SETUP_FINALLY to guard the __anext__ call */
-    ADDOP_JREL(c, SETUP_FINALLY, except);
+    ADDOP_JUMP(c, SETUP_FINALLY, &except);
     ADDOP(c, GET_ANEXT);
     ADDOP_LOAD_CONST(c, Py_None);
     ADDOP(c, YIELD_FROM);
@@ -2749,18 +2361,18 @@ compiler_async_for(struct compiler *c, stmt_ty s)
     /* Success block for __anext__ */
     VISIT(c, expr, s->v.AsyncFor.target);
     VISIT_SEQ(c, stmt, s->v.AsyncFor.body);
-    ADDOP_JABS(c, JUMP_ABSOLUTE, start);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &start);
 
-    compiler_pop_fblock(c, FOR_LOOP, start);
+    compiler_pop_fblock(c, FOR_LOOP, &start);
 
     /* Except block for __anext__ */
-    compiler_use_next_block(c, except);
+    ADD_LABEL(c, except);
     ADDOP(c, END_ASYNC_FOR);
 
     /* `else` block */
     VISIT_SEQ(c, stmt, s->v.For.orelse);
 
-    compiler_use_next_block(c, end);
+    ADD_LABEL(c, end);
 
     return 1;
 }
@@ -2768,64 +2380,22 @@ compiler_async_for(struct compiler *c, stmt_ty s)
 static int
 compiler_while(struct compiler *c, stmt_ty s)
 {
-    basicblock *loop, *orelse, *end, *anchor = NULL;
-    int constant = expr_constant(s->v.While.test);
+    LABEL(loop);
+    LABEL(end);
+    LABEL(anchor);
 
-    if (constant == 0) {
-        BEGIN_DO_NOT_EMIT_BYTECODE
-        // Push a dummy block so the VISIT_SEQ knows that we are
-        // inside a while loop so it can correctly evaluate syntax
-        // errors.
-        if (!compiler_push_fblock(c, WHILE_LOOP, NULL, NULL, NULL)) {
-            return 0;
-        }
-        VISIT_SEQ(c, stmt, s->v.While.body);
-        // Remove the dummy block now that is not needed.
-        compiler_pop_fblock(c, WHILE_LOOP, NULL);
-        END_DO_NOT_EMIT_BYTECODE
-        if (s->v.While.orelse) {
-            VISIT_SEQ(c, stmt, s->v.While.orelse);
-        }
-        return 1;
-    }
-    loop = compiler_new_block(c);
-    end = compiler_new_block(c);
-    if (constant == -1) {
-        anchor = compiler_new_block(c);
-        if (anchor == NULL)
-            return 0;
-    }
-    if (loop == NULL || end == NULL)
+    ADD_LABEL(c, loop);
+    if (!compiler_push_fblock(c, WHILE_LOOP, &loop, &end, NULL))
         return 0;
-    if (s->v.While.orelse) {
-        orelse = compiler_new_block(c);
-        if (orelse == NULL)
-            return 0;
-    }
-    else
-        orelse = NULL;
-
-    compiler_use_next_block(c, loop);
-    if (!compiler_push_fblock(c, WHILE_LOOP, loop, end, NULL))
+    if (!compiler_jump_if(c, s->v.While.test, &anchor, 0))
         return 0;
-    if (constant == -1) {
-        if (!compiler_jump_if(c, s->v.While.test, anchor, 0))
-            return 0;
-    }
     VISIT_SEQ(c, stmt, s->v.While.body);
-    ADDOP_JABS(c, JUMP_ABSOLUTE, loop);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &loop);
 
-    /* XXX should the two POP instructions be in a separate block
-       if there is no else clause ?
-    */
-
-    if (constant == -1)
-        compiler_use_next_block(c, anchor);
-    compiler_pop_fblock(c, WHILE_LOOP, loop);
-
-    if (orelse != NULL) /* what if orelse is just pass? */
-        VISIT_SEQ(c, stmt, s->v.While.orelse);
-    compiler_use_next_block(c, end);
+    ADD_LABEL(c, anchor);
+    compiler_pop_fblock(c, WHILE_LOOP, &loop);
+    VISIT_SEQ(c, stmt, s->v.While.orelse);
+    ADD_LABEL(c, end);
 
     return 1;
 }
@@ -2872,7 +2442,7 @@ compiler_break(struct compiler *c)
     if (!compiler_unwind_fblock(c, loop, 0)) {
         return 0;
     }
-    ADDOP_JABS(c, JUMP_ABSOLUTE, loop->fb_exit);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, loop->fb_exit);
     return 1;
 }
 
@@ -2886,10 +2456,9 @@ compiler_continue(struct compiler *c)
     if (loop == NULL) {
         return compiler_error(c, "'continue' not properly in loop");
     }
-    ADDOP_JABS(c, JUMP_ABSOLUTE, loop->fb_block);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, loop->fb_block);
     return 1;
 }
-
 
 /* Code generated for "try: <body> finally: <finalbody>" is as follows:
 
@@ -2923,18 +2492,13 @@ compiler_continue(struct compiler *c)
 static int
 compiler_try_finally(struct compiler *c, stmt_ty s)
 {
-    basicblock *body, *end, *exit;
-
-    body = compiler_new_block(c);
-    end = compiler_new_block(c);
-    exit = compiler_new_block(c);
-    if (body == NULL || end == NULL || exit == NULL)
-        return 0;
-
+    LABEL(body);
+    LABEL(end);
+    LABEL(exit);
     /* `try` block */
-    ADDOP_JREL(c, SETUP_FINALLY, end);
-    compiler_use_next_block(c, body);
-    if (!compiler_push_fblock(c, FINALLY_TRY, body, end, s->v.Try.finalbody))
+    ADDOP_JUMP(c, SETUP_FINALLY, &end);
+    ADD_LABEL(c, body);
+    if (!compiler_push_fblock(c, FINALLY_TRY, &body, &end, s->v.Try.finalbody))
         return 0;
     if (s->v.Try.handlers && asdl_seq_LEN(s->v.Try.handlers)) {
         if (!compiler_try_except(c, s))
@@ -2944,19 +2508,20 @@ compiler_try_finally(struct compiler *c, stmt_ty s)
         VISIT_SEQ(c, stmt, s->v.Try.body);
     }
     ADDOP(c, POP_BLOCK);
-    compiler_pop_fblock(c, FINALLY_TRY, body);
+    compiler_pop_fblock(c, FINALLY_TRY, &body);
     VISIT_SEQ(c, stmt, s->v.Try.finalbody);
-    ADDOP_JREL(c, JUMP_FORWARD, exit);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &exit);
     /* `finally` block */
-    compiler_use_next_block(c, end);
-    if (!compiler_push_fblock(c, FINALLY_END, end, NULL, NULL))
+    ADD_LABEL(c, end);
+    if (!compiler_push_fblock(c, FINALLY_END, &end, NULL, NULL))
         return 0;
     VISIT_SEQ(c, stmt, s->v.Try.finalbody);
-    compiler_pop_fblock(c, FINALLY_END, end);
+    compiler_pop_fblock(c, FINALLY_END, &end);
     ADDOP(c, RERAISE);
-    compiler_use_next_block(c, exit);
+    ADD_LABEL(c, exit);
     return 1;
 }
+
 
 /*
    Code generated for "try: S except E1 as V1: S1 except E2 as V2: S2 ...":
@@ -2968,7 +2533,7 @@ compiler_try_finally(struct compiler *c, stmt_ty s)
    []                           SETUP_FINALLY   L1
    []                           <code for S>
    []                           POP_BLOCK
-   []                           JUMP_FORWARD    L0
+   []                           JUMP_ABSOLUTE    L0
 
    [tb, val, exc]       L1:     DUP                             )
    [tb, val, exc, exc]          <evaluate E1>                   )
@@ -2978,7 +2543,7 @@ compiler_try_finally(struct compiler *c, stmt_ty s)
    [tb, val]                    <assign to V1>  (or POP if no V1)
    [tb]                         POP
    []                           <code for S1>
-                                JUMP_FORWARD    L0
+                                JUMP_ABSOLUTE    L0
 
    [tb, val, exc]       L2:     DUP
    .............................etc.......................
@@ -2992,52 +2557,42 @@ compiler_try_finally(struct compiler *c, stmt_ty s)
 static int
 compiler_try_except(struct compiler *c, stmt_ty s)
 {
-    basicblock *body, *orelse, *except, *end;
+    LABEL(body);
+    LABEL(except);
+    LABEL(end);
+    LABEL(orelse);
     Py_ssize_t i, n;
 
-    body = compiler_new_block(c);
-    except = compiler_new_block(c);
-    orelse = compiler_new_block(c);
-    end = compiler_new_block(c);
-    if (body == NULL || except == NULL || orelse == NULL || end == NULL)
-        return 0;
-    ADDOP_JREL(c, SETUP_FINALLY, except);
-    compiler_use_next_block(c, body);
-    if (!compiler_push_fblock(c, EXCEPT, body, NULL, NULL))
+    ADDOP_JUMP(c, SETUP_FINALLY, &except);
+    ADD_LABEL(c, body);
+    if (!compiler_push_fblock(c, EXCEPT, &body, NULL, NULL))
         return 0;
     VISIT_SEQ(c, stmt, s->v.Try.body);
     ADDOP(c, POP_BLOCK);
-    compiler_pop_fblock(c, EXCEPT, body);
-    ADDOP_JREL(c, JUMP_FORWARD, orelse);
+    compiler_pop_fblock(c, EXCEPT, &body);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &orelse);
     n = asdl_seq_LEN(s->v.Try.handlers);
-    compiler_use_next_block(c, except);
+    ADD_LABEL(c, except);
     for (i = 0; i < n; i++) {
         excepthandler_ty handler = (excepthandler_ty)asdl_seq_GET(
             s->v.Try.handlers, i);
         if (!handler->v.ExceptHandler.type && i < n-1)
             return compiler_error(c, "default 'except:' must be last");
-        c->u->u_lineno_set = 0;
+        assert(handler->lineno > 0);
         c->u->u_lineno = handler->lineno;
         c->u->u_col_offset = handler->col_offset;
-        except = compiler_new_block(c);
-        if (except == NULL)
-            return 0;
+        LABEL(handler_except);
         if (handler->v.ExceptHandler.type) {
             ADDOP(c, DUP_TOP);
             VISIT(c, expr, handler->v.ExceptHandler.type);
             ADDOP_I(c, COMPARE_OP, PyCmp_EXC_MATCH);
-            ADDOP_JABS(c, POP_JUMP_IF_FALSE, except);
+            ADDOP_JUMP(c, POP_JUMP_IF_FALSE, &handler_except);
         }
         ADDOP(c, POP_TOP);
         if (handler->v.ExceptHandler.name) {
-            basicblock *cleanup_end, *cleanup_body;
-
-            cleanup_end = compiler_new_block(c);
-            cleanup_body = compiler_new_block(c);
-            if (cleanup_end == NULL || cleanup_body == NULL) {
-                return 0;
-            }
-
+            LABEL(cleanup_end);
+            LABEL(cleanup_body);
+            
             compiler_nameop(c, handler->v.ExceptHandler.name, Store);
             ADDOP(c, POP_TOP);
 
@@ -3053,24 +2608,24 @@ compiler_try_except(struct compiler *c, stmt_ty s)
             */
 
             /* second try: */
-            ADDOP_JREL(c, SETUP_FINALLY, cleanup_end);
-            compiler_use_next_block(c, cleanup_body);
-            if (!compiler_push_fblock(c, HANDLER_CLEANUP, cleanup_body, NULL, handler->v.ExceptHandler.name))
+            ADDOP_JUMP(c, SETUP_FINALLY, &cleanup_end);
+            ADD_LABEL(c, cleanup_body);
+            if (!compiler_push_fblock(c, HANDLER_CLEANUP, &cleanup_body, NULL, handler->v.ExceptHandler.name))
                 return 0;
 
             /* second # body */
             VISIT_SEQ(c, stmt, handler->v.ExceptHandler.body);
-            compiler_pop_fblock(c, HANDLER_CLEANUP, cleanup_body);
+            compiler_pop_fblock(c, HANDLER_CLEANUP, &cleanup_body);
             ADDOP(c, POP_BLOCK);
             ADDOP(c, POP_EXCEPT);
             /* name = None; del name */
             ADDOP_LOAD_CONST(c, Py_None);
             compiler_nameop(c, handler->v.ExceptHandler.name, Store);
             compiler_nameop(c, handler->v.ExceptHandler.name, Del);
-            ADDOP_JREL(c, JUMP_FORWARD, end);
+            ADDOP_JUMP(c, JUMP_ABSOLUTE, &end);
 
             /* except: */
-            compiler_use_next_block(c, cleanup_end);
+            ADD_LABEL(c, cleanup_end);
 
             /* name = None; del name */
             ADDOP_LOAD_CONST(c, Py_None);
@@ -3080,28 +2635,24 @@ compiler_try_except(struct compiler *c, stmt_ty s)
             ADDOP(c, RERAISE);
         }
         else {
-            basicblock *cleanup_body;
-
-            cleanup_body = compiler_new_block(c);
-            if (!cleanup_body)
-                return 0;
+            LABEL(cleanup_body);
 
             ADDOP(c, POP_TOP);
             ADDOP(c, POP_TOP);
-            compiler_use_next_block(c, cleanup_body);
-            if (!compiler_push_fblock(c, HANDLER_CLEANUP, cleanup_body, NULL, NULL))
+            ADD_LABEL(c, cleanup_body);
+            if (!compiler_push_fblock(c, HANDLER_CLEANUP, &cleanup_body, NULL, NULL))
                 return 0;
             VISIT_SEQ(c, stmt, handler->v.ExceptHandler.body);
-            compiler_pop_fblock(c, HANDLER_CLEANUP, cleanup_body);
+            compiler_pop_fblock(c, HANDLER_CLEANUP, &cleanup_body);
             ADDOP(c, POP_EXCEPT);
-            ADDOP_JREL(c, JUMP_FORWARD, end);
+            ADDOP_JUMP(c, JUMP_ABSOLUTE, &end);
         }
-        compiler_use_next_block(c, except);
+        ADD_LABEL(c, handler_except);
     }
     ADDOP(c, RERAISE);
-    compiler_use_next_block(c, orelse);
+    ADD_LABEL(c, orelse);
     VISIT_SEQ(c, stmt, s->v.Try.orelse);
-    compiler_use_next_block(c, end);
+    ADD_LABEL(c, end);
     return 1;
 }
 
@@ -3112,7 +2663,6 @@ compiler_try(struct compiler *c, stmt_ty s) {
     else
         return compiler_try_except(c, s);
 }
-
 
 static int
 compiler_import_as(struct compiler *c, identifier name, identifier asname)
@@ -3266,7 +2816,7 @@ compiler_from_import(struct compiler *c, stmt_ty s)
 static int
 compiler_assert(struct compiler *c, stmt_ty s)
 {
-    basicblock *end;
+    LABEL(end);
 
     if (c->c_optimize)
         return 1;
@@ -3279,10 +2829,7 @@ compiler_assert(struct compiler *c, stmt_ty s)
             return 0;
         }
     }
-    end = compiler_new_block(c);
-    if (end == NULL)
-        return 0;
-    if (!compiler_jump_if(c, s->v.Assert.test, end, 1))
+    if (!compiler_jump_if(c, s->v.Assert.test, &end, 1))
         return 0;
     ADDOP(c, LOAD_ASSERTION_ERROR);
     if (s->v.Assert.msg) {
@@ -3290,7 +2837,7 @@ compiler_assert(struct compiler *c, stmt_ty s)
         ADDOP_I(c, CALL_FUNCTION, 1);
     }
     ADDOP_I(c, RAISE_VARARGS, 1);
-    compiler_use_next_block(c, end);
+    ADD_LABEL(c, end);
     return 1;
 }
 
@@ -3321,7 +2868,6 @@ compiler_visit_stmt(struct compiler *c, stmt_ty s)
     /* Always assign a lineno to the next instruction for a stmt. */
     c->u->u_lineno = s->lineno;
     c->u->u_col_offset = s->col_offset;
-    c->u->u_lineno_set = 0;
 
     switch (s->kind) {
     case FunctionDef_kind:
@@ -3625,7 +3171,7 @@ compiler_nameop(struct compiler *c, identifier name, expr_context_ty ctx)
 static int
 compiler_boolop(struct compiler *c, expr_ty e)
 {
-    basicblock *end;
+    LABEL(end);
     int jumpi;
     Py_ssize_t i, n;
     asdl_seq *s;
@@ -3635,18 +3181,15 @@ compiler_boolop(struct compiler *c, expr_ty e)
         jumpi = JUMP_IF_FALSE_OR_POP;
     else
         jumpi = JUMP_IF_TRUE_OR_POP;
-    end = compiler_new_block(c);
-    if (end == NULL)
-        return 0;
     s = e->v.BoolOp.values;
     n = asdl_seq_LEN(s) - 1;
     assert(n >= 0);
     for (i = 0; i < n; ++i) {
         VISIT(c, expr, (expr_ty)asdl_seq_GET(s, i));
-        ADDOP_JABS(c, jumpi, end);
+        ADDOP_JUMP(c, jumpi, &end);
     }
     VISIT(c, expr, (expr_ty)asdl_seq_GET(s, n));
-    compiler_use_next_block(c, end);
+    ADD_LABEL(c, end);
     return 1;
 }
 
@@ -3734,6 +3277,7 @@ assignment_helper(struct compiler *c, asdl_seq *elts)
     VISIT_SEQ(c, expr, elts);
     return 1;
 }
+
 
 static int
 compiler_list(struct compiler *c, expr_ty e)
@@ -3873,9 +3417,8 @@ compiler_compare(struct compiler *c, expr_ty e)
             cmpop((cmpop_ty)(asdl_seq_GET(e->v.Compare.ops, 0))));
     }
     else {
-        basicblock *cleanup = compiler_new_block(c);
-        if (cleanup == NULL)
-            return 0;
+        LABEL(cleanup);
+        LABEL(end);
         for (i = 0; i < n; i++) {
             VISIT(c, expr,
                 (expr_ty)asdl_seq_GET(e->v.Compare.comparators, i));
@@ -3883,23 +3426,20 @@ compiler_compare(struct compiler *c, expr_ty e)
             ADDOP(c, ROT_THREE);
             ADDOP_I(c, COMPARE_OP,
                 cmpop((cmpop_ty)(asdl_seq_GET(e->v.Compare.ops, i))));
-            ADDOP_JABS(c, JUMP_IF_FALSE_OR_POP, cleanup);
-            NEXT_BLOCK(c);
+            ADDOP_JUMP(c, JUMP_IF_FALSE_OR_POP, &cleanup);
         }
         VISIT(c, expr, (expr_ty)asdl_seq_GET(e->v.Compare.comparators, n));
         ADDOP_I(c, COMPARE_OP,
             cmpop((cmpop_ty)(asdl_seq_GET(e->v.Compare.ops, n))));
-        basicblock *end = compiler_new_block(c);
-        if (end == NULL)
-            return 0;
-        ADDOP_JREL(c, JUMP_FORWARD, end);
-        compiler_use_next_block(c, cleanup);
+        ADDOP_JUMP(c, JUMP_ABSOLUTE, &end);
+        ADD_LABEL(c, cleanup);
         ADDOP(c, ROT_TWO);
         ADDOP(c, POP_TOP);
-        compiler_use_next_block(c, end);
+        ADD_LABEL(c, end);
     }
     return 1;
 }
+
 
 static PyTypeObject *
 infer_type(expr_ty e)
@@ -4047,7 +3587,6 @@ maybe_optimize_method_call(struct compiler *c, expr_ty e)
     ADDOP_I(c, CALL_METHOD, asdl_seq_LEN(e->v.Call.args));
     return 1;
 }
-
 static int
 compiler_call(struct compiler *c, expr_ty e)
 {
@@ -4307,17 +3846,11 @@ compiler_sync_comprehension_generator(struct compiler *c,
        and then write to the element */
 
     comprehension_ty gen;
-    basicblock *start, *anchor, *skip, *if_cleanup;
+    LABEL(start);
+    LABEL(anchor);
+    LABEL(skip);
+    LABEL(if_cleanup);
     Py_ssize_t i, n;
-
-    start = compiler_new_block(c);
-    skip = compiler_new_block(c);
-    if_cleanup = compiler_new_block(c);
-    anchor = compiler_new_block(c);
-
-    if (start == NULL || skip == NULL || if_cleanup == NULL ||
-        anchor == NULL)
-        return 0;
 
     gen = (comprehension_ty)asdl_seq_GET(generators, gen_index);
 
@@ -4331,18 +3864,16 @@ compiler_sync_comprehension_generator(struct compiler *c,
         VISIT(c, expr, gen->iter);
         ADDOP(c, GET_ITER);
     }
-    compiler_use_next_block(c, start);
-    ADDOP_JREL(c, FOR_ITER, anchor);
-    NEXT_BLOCK(c);
+    ADD_LABEL(c, start);
+    ADDOP_JUMP(c, FOR_ITER, &anchor);
     VISIT(c, expr, gen->target);
 
     /* XXX this needs to be cleaned up...a lot! */
     n = asdl_seq_LEN(gen->ifs);
     for (i = 0; i < n; i++) {
         expr_ty e = (expr_ty)asdl_seq_GET(gen->ifs, i);
-        if (!compiler_jump_if(c, e, if_cleanup, 0))
+        if (!compiler_jump_if(c, e, &if_cleanup, 0))
             return 0;
-        NEXT_BLOCK(c);
     }
 
     if (++gen_index < asdl_seq_LEN(generators))
@@ -4379,11 +3910,11 @@ compiler_sync_comprehension_generator(struct compiler *c,
             return 0;
         }
 
-        compiler_use_next_block(c, skip);
+        ADD_LABEL(c, skip);
     }
-    compiler_use_next_block(c, if_cleanup);
-    ADDOP_JABS(c, JUMP_ABSOLUTE, start);
-    compiler_use_next_block(c, anchor);
+    ADD_LABEL(c, if_cleanup);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &start);
+    ADD_LABEL(c, anchor);
 
     return 1;
 }
@@ -4394,15 +3925,10 @@ compiler_async_comprehension_generator(struct compiler *c,
                                       expr_ty elt, expr_ty val, int type)
 {
     comprehension_ty gen;
-    basicblock *start, *if_cleanup, *except;
+    LABEL(start);
+    LABEL(except);
+    LABEL(if_cleanup);
     Py_ssize_t i, n;
-    start = compiler_new_block(c);
-    except = compiler_new_block(c);
-    if_cleanup = compiler_new_block(c);
-
-    if (start == NULL || if_cleanup == NULL || except == NULL) {
-        return 0;
-    }
 
     gen = (comprehension_ty)asdl_seq_GET(generators, gen_index);
 
@@ -4417,9 +3943,9 @@ compiler_async_comprehension_generator(struct compiler *c,
         ADDOP(c, GET_AITER);
     }
 
-    compiler_use_next_block(c, start);
+    ADD_LABEL(c, start);
 
-    ADDOP_JREL(c, SETUP_FINALLY, except);
+    ADDOP_JUMP(c, SETUP_FINALLY, &except);
     ADDOP(c, GET_ANEXT);
     ADDOP_LOAD_CONST(c, Py_None);
     ADDOP(c, YIELD_FROM);
@@ -4429,9 +3955,8 @@ compiler_async_comprehension_generator(struct compiler *c,
     n = asdl_seq_LEN(gen->ifs);
     for (i = 0; i < n; i++) {
         expr_ty e = (expr_ty)asdl_seq_GET(gen->ifs, i);
-        if (!compiler_jump_if(c, e, if_cleanup, 0))
+        if (!compiler_jump_if(c, e, &if_cleanup, 0))
             return 0;
-        NEXT_BLOCK(c);
     }
 
     if (++gen_index < asdl_seq_LEN(generators))
@@ -4468,10 +3993,10 @@ compiler_async_comprehension_generator(struct compiler *c,
             return 0;
         }
     }
-    compiler_use_next_block(c, if_cleanup);
-    ADDOP_JABS(c, JUMP_ABSOLUTE, start);
+    ADD_LABEL(c, if_cleanup);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &start);
 
-    compiler_use_next_block(c, except);
+    ADD_LABEL(c, except);
     ADDOP(c, END_ASYNC_FOR);
 
     return 1;
@@ -4529,11 +4054,12 @@ compiler_comprehension(struct compiler *c, expr_ty e, int type,
                                           val, type))
         goto error_in_scope;
 
-    if (type != COMP_GENEXP) {
-        ADDOP(c, RETURN_VALUE);
+    if (type == COMP_GENEXP) {
+        ADDOP_LOAD_CONST(c, Py_None);
     }
+    ADDOP(c, RETURN_VALUE);
 
-    co = assemble(c, 1);
+    co = make_code(c);
     qualname = c->u->u_qualname;
     Py_INCREF(qualname);
     compiler_exit_scope(c);
@@ -4615,7 +4141,6 @@ compiler_setcomp(struct compiler *c, expr_ty e)
                                   e->v.SetComp.elt, NULL);
 }
 
-
 static int
 compiler_dictcomp(struct compiler *c, expr_ty e)
 {
@@ -4631,7 +4156,6 @@ compiler_dictcomp(struct compiler *c, expr_ty e)
                                   e->v.DictComp.key, e->v.DictComp.value);
 }
 
-
 static int
 compiler_visit_keyword(struct compiler *c, keyword_ty k)
 {
@@ -4639,30 +4163,12 @@ compiler_visit_keyword(struct compiler *c, keyword_ty k)
     return 1;
 }
 
-/* Test whether expression is constant.  For constants, report
-   whether they are true or false.
-
-   Return values: 1 for true, 0 for false, -1 for non-constant.
- */
-
-static int
-expr_constant(expr_ty e)
-{
-    if (e->kind == Constant_kind) {
-        return PyObject_IsTrue(e->v.Constant.value);
-    }
-    return -1;
-}
-
 static int
 compiler_with_except_finish(struct compiler *c) {
-    basicblock *exit;
-    exit = compiler_new_block(c);
-    if (exit == NULL)
-        return 0;
-    ADDOP_JABS(c, POP_JUMP_IF_TRUE, exit);
+    LABEL(exit);
+    ADDOP_JUMP(c, POP_JUMP_IF_TRUE, &exit);
     ADDOP(c, RERAISE);
-    compiler_use_next_block(c, exit);
+    ADD_LABEL(c, exit);
     ADDOP(c, POP_TOP);
     ADDOP(c, POP_TOP);
     ADDOP(c, POP_TOP);
@@ -4698,7 +4204,9 @@ compiler_with_except_finish(struct compiler *c) {
 static int
 compiler_async_with(struct compiler *c, stmt_ty s, int pos)
 {
-    basicblock *block, *final, *exit;
+    LABEL(block);
+    LABEL(final);
+    LABEL(exit);
     withitem_ty item = asdl_seq_GET(s->v.AsyncWith.items, pos);
 
     assert(s->kind == AsyncWith_kind);
@@ -4708,12 +4216,6 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
         return compiler_error(c, "'async with' outside async function");
     }
 
-    block = compiler_new_block(c);
-    final = compiler_new_block(c);
-    exit = compiler_new_block(c);
-    if (!block || !final || !exit)
-        return 0;
-
     /* Evaluate EXPR */
     VISIT(c, expr, item->context_expr);
 
@@ -4722,11 +4224,11 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
     ADDOP_LOAD_CONST(c, Py_None);
     ADDOP(c, YIELD_FROM);
 
-    ADDOP_JREL(c, SETUP_ASYNC_WITH, final);
+    ADDOP_JUMP(c, SETUP_ASYNC_WITH, &final);
 
     /* SETUP_ASYNC_WITH pushes a finally block. */
-    compiler_use_next_block(c, block);
-    if (!compiler_push_fblock(c, ASYNC_WITH, block, final, NULL)) {
+    ADD_LABEL(c, block);
+    if (!compiler_push_fblock(c, ASYNC_WITH, &block, &final, NULL)) {
         return 0;
     }
 
@@ -4745,7 +4247,7 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
     else if (!compiler_async_with(c, s, pos))
             return 0;
 
-    compiler_pop_fblock(c, ASYNC_WITH, block);
+    compiler_pop_fblock(c, ASYNC_WITH, &block);
     ADDOP(c, POP_BLOCK);
     /* End of body; start the cleanup */
 
@@ -4760,10 +4262,10 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
 
     ADDOP(c, POP_TOP);
 
-    ADDOP_JABS(c, JUMP_ABSOLUTE, exit);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &exit);
 
     /* For exceptional outcome: */
-    compiler_use_next_block(c, final);
+    ADD_LABEL(c, final);
 
     ADDOP(c, WITH_EXCEPT_START);
     ADDOP(c, GET_AWAITABLE);
@@ -4771,10 +4273,9 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
     ADDOP(c, YIELD_FROM);
     compiler_with_except_finish(c);
 
-compiler_use_next_block(c, exit);
+    ADD_LABEL(c, exit);
     return 1;
 }
-
 
 /*
    Implements the with statement from PEP 343.
@@ -4787,7 +4288,7 @@ compiler_use_next_block(c, exit);
         <code for BLOCK>
         LOAD_CONST (None, None, None)
         CALL_FUNCTION_EX 0
-        JUMP_FORWARD  EXIT
+        JUMP_ABSOLUTE  EXIT
     E:  WITH_EXCEPT_START (calls EXPR.__exit__)
         POP_JUMP_IF_TRUE T:
         RERAISE
@@ -4800,25 +4301,21 @@ compiler_use_next_block(c, exit);
 static int
 compiler_with(struct compiler *c, stmt_ty s, int pos)
 {
-    basicblock *block, *final, *exit;
+    LABEL(block);
+    LABEL(final);
+    LABEL(exit);
     withitem_ty item = asdl_seq_GET(s->v.With.items, pos);
 
     assert(s->kind == With_kind);
 
-    block = compiler_new_block(c);
-    final = compiler_new_block(c);
-    exit = compiler_new_block(c);
-    if (!block || !final || !exit)
-        return 0;
-
     /* Evaluate EXPR */
     VISIT(c, expr, item->context_expr);
     /* Will push bound __exit__ */
-    ADDOP_JREL(c, SETUP_WITH, final);
+    ADDOP_JUMP(c, SETUP_WITH, &final);
 
     /* SETUP_WITH pushes a finally block. */
-    compiler_use_next_block(c, block);
-    if (!compiler_push_fblock(c, WITH, block, final, NULL)) {
+    ADD_LABEL(c, block);
+    if (!compiler_push_fblock(c, WITH, &block, &final, NULL)) {
         return 0;
     }
 
@@ -4838,7 +4335,7 @@ compiler_with(struct compiler *c, stmt_ty s, int pos)
             return 0;
 
     ADDOP(c, POP_BLOCK);
-    compiler_pop_fblock(c, WITH, block);
+    compiler_pop_fblock(c, WITH, &block);
     
     /* End of body; start the cleanup. */
     
@@ -4848,15 +4345,15 @@ compiler_with(struct compiler *c, stmt_ty s, int pos)
     if (!compiler_call_exit_with_nones(c))
         return 0;
     ADDOP(c, POP_TOP);
-    ADDOP_JREL(c, JUMP_FORWARD, exit);
+    ADDOP_JUMP(c, JUMP_ABSOLUTE, &exit);
 
     /* For exceptional outcome: */
-    compiler_use_next_block(c, final);
+    ADD_LABEL(c, final);
 
     ADDOP(c, WITH_EXCEPT_START);
     compiler_with_except_finish(c);
 
-    compiler_use_next_block(c, exit);
+    ADD_LABEL(c, exit);
     return 1;
 }
 
@@ -5039,8 +4536,8 @@ compiler_visit_expr(struct compiler *c, expr_ty e)
     int old_lineno = c->u->u_lineno;
     int old_col_offset = c->u->u_col_offset;
     if (e->lineno != c->u->u_lineno) {
+        assert(e->lineno > 0);
         c->u->u_lineno = e->lineno;
-        c->u->u_lineno_set = 0;
     }
     /* Updating the column offset is always harmless. */
     c->u->u_col_offset = e->col_offset;
@@ -5049,11 +4546,11 @@ compiler_visit_expr(struct compiler *c, expr_ty e)
 
     if (old_lineno != c->u->u_lineno) {
         c->u->u_lineno = old_lineno;
-        c->u->u_lineno_set = 0;
     }
     c->u->u_col_offset = old_col_offset;
     return res;
 }
+
 
 static int
 compiler_augassign(struct compiler *c, stmt_ty s)
@@ -5425,369 +4922,33 @@ compiler_visit_slice(struct compiler *c, slice_ty s, expr_context_ty ctx)
     return compiler_handle_subscr(c, kindname, ctx);
 }
 
-/* End of the compiler section, beginning of the assembler section */
-
-/* do depth-first search of basic block graph, starting with block.
-   post records the block indices in post-order.
-
-   XXX must handle implicit jumps from one block to next
-*/
-
-struct assembler {
-    PyObject *a_bytecode;  /* string containing bytecode */
-    int a_offset;              /* offset into bytecode */
-    int a_nblocks;             /* number of reachable blocks */
-    basicblock **a_postorder; /* list of blocks in dfs postorder */
-    PyObject *a_lnotab;    /* string containing lnotab */
-    int a_lnotab_off;      /* offset into lnotab */
-    int a_lineno;              /* last lineno of emitted instruction */
-    int a_lineno_off;      /* bytecode offset of last lineno */
-};
-
-static void
-dfs(struct compiler *c, basicblock *b, struct assembler *a, int end)
-{
-    int i, j;
-
-    /* Get rid of recursion for normal control flow.
-       Since the number of blocks is limited, unused space in a_postorder
-       (from a_nblocks to end) can be used as a stack for still not ordered
-       blocks. */
-    for (j = end; b && !b->b_seen; b = b->b_next) {
-        b->b_seen = 1;
-        assert(a->a_nblocks < j);
-        a->a_postorder[--j] = b;
-    }
-    while (j < end) {
-        b = a->a_postorder[j++];
-        for (i = 0; i < b->b_iused; i++) {
-            struct instr *instr = &b->b_instr[i];
-            if (instr->i_jrel || instr->i_jabs)
-                dfs(c, instr->i_target, a, j);
-        }
-        assert(a->a_nblocks < j);
-        a->a_postorder[a->a_nblocks++] = b;
-    }
-}
-
-Py_LOCAL_INLINE(void)
-stackdepth_push(basicblock ***sp, basicblock *b, int depth)
-{
-    assert(b->b_startdepth < 0 || b->b_startdepth == depth);
-    if (b->b_startdepth < depth && b->b_startdepth < 100) {
-        assert(b->b_startdepth < 0);
-        b->b_startdepth = depth;
-        *(*sp)++ = b;
-    }
-}
-
-/* Find the flow path that needs the largest stack.  We assume that
- * cycles in the flow graph have no net effect on the stack depth.
- */
+// Merge *tuple* with constant cache.
+// Unlike merge_consts_recursive(), this function doesn't work recursively.
 static int
-stackdepth(struct compiler *c)
+merge_const_tuple(struct compiler *c, PyObject **tuple)
 {
-    basicblock *b, *entryblock = NULL;
-    basicblock **stack, **sp;
-    int nblocks = 0, maxdepth = 0;
-    for (b = c->u->u_blocks; b != NULL; b = b->b_list) {
-        b->b_startdepth = INT_MIN;
-        entryblock = b;
-        nblocks++;
-    }
-    if (!entryblock)
-        return 0;
-    stack = (basicblock **)PyObject_Malloc(sizeof(basicblock *) * nblocks);
-    if (!stack) {
-        PyErr_NoMemory();
-        return -1;
-    }
+    assert(PyTuple_CheckExact(*tuple));
 
-    sp = stack;
-    stackdepth_push(&sp, entryblock, 0);
-    while (sp != stack) {
-        b = *--sp;
-        int depth = b->b_startdepth;
-        assert(depth >= 0);
-        basicblock *next = b->b_next;
-        for (int i = 0; i < b->b_iused; i++) {
-            struct instr *instr = &b->b_instr[i];
-            int effect = stack_effect(instr->i_opcode, instr->i_oparg, 0);
-            if (effect == PY_INVALID_STACK_EFFECT) {
-                fprintf(stderr, "opcode = %d\n", instr->i_opcode);
-                Py_FatalError("PyCompile_OpcodeStackEffect()");
-            }
-            int new_depth = depth + effect;
-            if (new_depth > maxdepth) {
-                maxdepth = new_depth;
-            }
-            assert(depth >= 0); /* invalid code or bug in stackdepth() */
-            if (instr->i_jrel || instr->i_jabs) {
-                effect = stack_effect(instr->i_opcode, instr->i_oparg, 1);
-                assert(effect != PY_INVALID_STACK_EFFECT);
-                int target_depth = depth + effect;
-                if (target_depth > maxdepth) {
-                    maxdepth = target_depth;
-                }
-                assert(target_depth >= 0); /* invalid code or bug in stackdepth() */
-                stackdepth_push(&sp, instr->i_target, target_depth);
-            }
-            depth = new_depth;
-            if (instr->i_opcode == JUMP_ABSOLUTE ||
-                instr->i_opcode == JUMP_FORWARD ||
-                instr->i_opcode == RETURN_VALUE ||
-                instr->i_opcode == RAISE_VARARGS ||
-                instr->i_opcode == RERAISE)
-            {
-                /* remaining code is dead */
-                next = NULL;
-                break;
-            }
-        }
-        if (next != NULL) {
-            stackdepth_push(&sp, next, depth);
-        }
-    }
-    PyObject_Free(stack);
-    return maxdepth;
-}
-
-static int
-assemble_init(struct assembler *a, int nblocks, int firstlineno)
-{
-    memset(a, 0, sizeof(struct assembler));
-    a->a_lineno = firstlineno;
-    a->a_bytecode = PyBytes_FromStringAndSize(NULL, DEFAULT_CODE_SIZE);
-    if (!a->a_bytecode)
-        return 0;
-    a->a_lnotab = PyBytes_FromStringAndSize(NULL, DEFAULT_LNOTAB_SIZE);
-    if (!a->a_lnotab)
-        return 0;
-    if ((size_t)nblocks > SIZE_MAX / sizeof(basicblock *)) {
-        PyErr_NoMemory();
+    PyObject *key = _PyCode_ConstantKey(*tuple);
+    if (key == NULL) {
         return 0;
     }
-    a->a_postorder = (basicblock **)PyObject_Malloc(
-                                        sizeof(basicblock *) * nblocks);
-    if (!a->a_postorder) {
-        PyErr_NoMemory();
+
+    // t is borrowed reference
+    PyObject *t = PyDict_SetDefault(c->c_const_cache, key, key);
+    Py_DECREF(key);
+    if (t == NULL) {
         return 0;
     }
-    return 1;
-}
-
-static void
-assemble_free(struct assembler *a)
-{
-    Py_XDECREF(a->a_bytecode);
-    Py_XDECREF(a->a_lnotab);
-    if (a->a_postorder)
-        PyObject_Free(a->a_postorder);
-}
-
-static int
-blocksize(basicblock *b)
-{
-    int i;
-    int size = 0;
-
-    for (i = 0; i < b->b_iused; i++)
-        size += instrsize(b->b_instr[i].i_oparg);
-    return size;
-}
-
-/* Appends a pair to the end of the line number table, a_lnotab, representing
-   the instruction's bytecode offset and line number.  See
-   Objects/lnotab_notes.txt for the description of the line number table. */
-
-static int
-assemble_lnotab(struct assembler *a, struct instr *i)
-{
-    int d_bytecode, d_lineno;
-    Py_ssize_t len;
-    unsigned char *lnotab;
-
-    d_bytecode = (a->a_offset - a->a_lineno_off) * sizeof(_Py_CODEUNIT);
-    d_lineno = i->i_lineno - a->a_lineno;
-
-    assert(d_bytecode >= 0);
-
-    if(d_bytecode == 0 && d_lineno == 0)
+    if (t == key) {  // tuple is new constant.
         return 1;
+    }
 
-    if (d_bytecode > 255) {
-        int j, nbytes, ncodes = d_bytecode / 255;
-        nbytes = a->a_lnotab_off + 2 * ncodes;
-        len = PyBytes_GET_SIZE(a->a_lnotab);
-        if (nbytes >= len) {
-            if ((len <= INT_MAX / 2) && (len * 2 < nbytes))
-                len = nbytes;
-            else if (len <= INT_MAX / 2)
-                len *= 2;
-            else {
-                PyErr_NoMemory();
-                return 0;
-            }
-            if (_PyBytes_Resize(&a->a_lnotab, len) < 0)
-                return 0;
-        }
-        lnotab = (unsigned char *)
-                   PyBytes_AS_STRING(a->a_lnotab) + a->a_lnotab_off;
-        for (j = 0; j < ncodes; j++) {
-            *lnotab++ = 255;
-            *lnotab++ = 0;
-        }
-        d_bytecode -= ncodes * 255;
-        a->a_lnotab_off += ncodes * 2;
-    }
-    assert(0 <= d_bytecode && d_bytecode <= 255);
-
-    if (d_lineno < -128 || 127 < d_lineno) {
-        int j, nbytes, ncodes, k;
-        if (d_lineno < 0) {
-            k = -128;
-            /* use division on positive numbers */
-            ncodes = (-d_lineno) / 128;
-        }
-        else {
-            k = 127;
-            ncodes = d_lineno / 127;
-        }
-        d_lineno -= ncodes * k;
-        assert(ncodes >= 1);
-        nbytes = a->a_lnotab_off + 2 * ncodes;
-        len = PyBytes_GET_SIZE(a->a_lnotab);
-        if (nbytes >= len) {
-            if ((len <= INT_MAX / 2) && len * 2 < nbytes)
-                len = nbytes;
-            else if (len <= INT_MAX / 2)
-                len *= 2;
-            else {
-                PyErr_NoMemory();
-                return 0;
-            }
-            if (_PyBytes_Resize(&a->a_lnotab, len) < 0)
-                return 0;
-        }
-        lnotab = (unsigned char *)
-                   PyBytes_AS_STRING(a->a_lnotab) + a->a_lnotab_off;
-        *lnotab++ = d_bytecode;
-        *lnotab++ = k;
-        d_bytecode = 0;
-        for (j = 1; j < ncodes; j++) {
-            *lnotab++ = 0;
-            *lnotab++ = k;
-        }
-        a->a_lnotab_off += ncodes * 2;
-    }
-    assert(-128 <= d_lineno && d_lineno <= 127);
-
-    len = PyBytes_GET_SIZE(a->a_lnotab);
-    if (a->a_lnotab_off + 2 >= len) {
-        if (_PyBytes_Resize(&a->a_lnotab, len * 2) < 0)
-            return 0;
-    }
-    lnotab = (unsigned char *)
-                    PyBytes_AS_STRING(a->a_lnotab) + a->a_lnotab_off;
-
-    a->a_lnotab_off += 2;
-    if (d_bytecode) {
-        *lnotab++ = d_bytecode;
-        *lnotab++ = d_lineno;
-    }
-    else {      /* First line of a block; def stmt, etc. */
-        *lnotab++ = 0;
-        *lnotab++ = d_lineno;
-    }
-    a->a_lineno = i->i_lineno;
-    a->a_lineno_off = a->a_offset;
+    PyObject *u = PyTuple_GET_ITEM(t, 1);
+    Py_INCREF(u);
+    Py_DECREF(*tuple);
+    *tuple = u;
     return 1;
-}
-
-/* assemble_emit()
-   Extend the bytecode with a new instruction.
-   Update lnotab if necessary.
-*/
-
-static int
-assemble_emit(struct assembler *a, struct instr *i)
-{
-    int size, arg = 0;
-    Py_ssize_t len = PyBytes_GET_SIZE(a->a_bytecode);
-    _Py_CODEUNIT *code;
-
-    arg = i->i_oparg;
-    size = instrsize(arg);
-    if (i->i_lineno && !assemble_lnotab(a, i))
-        return 0;
-    if (a->a_offset + size >= len / (int)sizeof(_Py_CODEUNIT)) {
-        if (len > PY_SSIZE_T_MAX / 2)
-            return 0;
-        if (_PyBytes_Resize(&a->a_bytecode, len * 2) < 0)
-            return 0;
-    }
-    code = (_Py_CODEUNIT *)PyBytes_AS_STRING(a->a_bytecode) + a->a_offset;
-    a->a_offset += size;
-    write_op_arg(code, i->i_opcode, arg, size);
-    return 1;
-}
-
-static void
-assemble_jump_offsets(struct assembler *a, struct compiler *c)
-{
-    basicblock *b;
-    int bsize, totsize, extended_arg_recompile;
-    int i;
-
-    /* Compute the size of each block and fixup jump args.
-       Replace block pointer with position in bytecode. */
-    do {
-        totsize = 0;
-        for (i = a->a_nblocks - 1; i >= 0; i--) {
-            b = a->a_postorder[i];
-            bsize = blocksize(b);
-            b->b_offset = totsize;
-            totsize += bsize;
-        }
-        extended_arg_recompile = 0;
-        for (b = c->u->u_blocks; b != NULL; b = b->b_list) {
-            bsize = b->b_offset;
-            for (i = 0; i < b->b_iused; i++) {
-                struct instr *instr = &b->b_instr[i];
-                int isize = instrsize(instr->i_oparg);
-                /* Relative jumps are computed relative to
-                   the instruction pointer after fetching
-                   the jump instruction.
-                */
-                bsize += isize;
-                if (instr->i_jabs || instr->i_jrel) {
-                    instr->i_oparg = instr->i_target->b_offset;
-                    if (instr->i_jrel) {
-                        instr->i_oparg -= bsize;
-                    }
-                    instr->i_oparg *= sizeof(_Py_CODEUNIT);
-                    if (instrsize(instr->i_oparg) != isize) {
-                        extended_arg_recompile = 1;
-                    }
-                }
-            }
-        }
-
-    /* XXX: This is an awful hack that could hurt performance, but
-        on the bright side it should work until we come up
-        with a better solution.
-
-        The issue is that in the first loop blocksize() is called
-        which calls instrsize() which requires i_oparg be set
-        appropriately. There is a bootstrap problem because
-        i_oparg is calculated in the second loop above.
-
-        So we loop until we stop seeing new EXTENDED_ARGs.
-        The only EXTENDED_ARGs that could be popping up are
-        ones in jump instructions.  So this should converge
-        fairly quickly.
-    */
-    } while (extended_arg_recompile);
 }
 
 static PyObject *
@@ -5867,53 +5028,55 @@ compute_code_flags(struct compiler *c)
     return flags;
 }
 
-// Merge *tuple* with constant cache.
-// Unlike merge_consts_recursive(), this function doesn't work recursively.
-static int
-merge_const_tuple(struct compiler *c, PyObject **tuple)
+PyCodeObject *
+make_code(struct compiler *c)
 {
-    assert(PyTuple_CheckExact(*tuple));
-
-    PyObject *key = _PyCode_ConstantKey(*tuple);
-    if (key == NULL) {
-        return 0;
-    }
-
-    // t is borrowed reference
-    PyObject *t = PyDict_SetDefault(c->c_const_cache, key, key);
-    Py_DECREF(key);
-    if (t == NULL) {
-        return 0;
-    }
-    if (t == key) {  // tuple is new constant.
-        return 1;
-    }
-
-    PyObject *u = PyTuple_GET_ITEM(t, 1);
-    Py_INCREF(u);
-    Py_DECREF(*tuple);
-    *tuple = u;
-    return 1;
-}
-
-static PyCodeObject *
-makecode(struct compiler *c, struct assembler *a)
-{
-    PyObject *tmp;
+    Assembler *assembler = NULL;
     PyCodeObject *co = NULL;
-    PyObject *consts = NULL;
+    ControlFlowGraph * cfg = createCfg(c->u->u_instructions, c->u->u_instruction_count);
+    if (cfg == NULL) {
+        return NULL;
+    }
+    
+    PyObject *consts = consts_dict_keys_inorder(c->u->u_consts);
+    if (consts == NULL) {
+        goto error;
+    }
+
+    /* Optimization goes here */
+    //if (_Py_Optimize(cfg, consts)) {
+    //    goto error;
+    //}
+    
+    _PyCfg_MarkReachable(cfg);
+    int maxdepth = computeMaxStackDepth(cfg);
+    
+    /* Set firstlineno if it wasn't explicitly set. */
+    if (!c->u->u_firstlineno) {
+        if(cfg->instructions[0].i_lineno) {
+            c->u->u_firstlineno = cfg->instructions[0].i_lineno;
+        }
+        else {
+            c->u->u_firstlineno = 1;
+        }
+    }
+
+    assembler = assemble(cfg, c->u->u_firstlineno);
+    if (assembler == NULL) {
+        _Py_FreeCfg(cfg);
+        return NULL;
+    }
+
     PyObject *names = NULL;
     PyObject *varnames = NULL;
     PyObject *name = NULL;
     PyObject *freevars = NULL;
     PyObject *cellvars = NULL;
-    PyObject *bytecode = NULL;
     Py_ssize_t nlocals;
     int nlocals_int;
     int flags;
-    int posorkeywordargcount, posonlyargcount, kwonlyargcount, maxdepth;
-
-    consts = consts_dict_keys_inorder(c->u->u_consts);
+    int posorkeywordargcount, posonlyargcount, kwonlyargcount;
+    
     names = dict_keys_inorder(c->u->u_names, 0);
     varnames = dict_keys_inorder(c->u->u_varnames, 0);
     if (!consts || !names || !varnames)
@@ -5942,13 +5105,10 @@ makecode(struct compiler *c, struct assembler *a)
     if (flags < 0)
         goto error;
 
-    bytecode = PyCode_Optimize(a->a_bytecode, consts, names, a->a_lnotab);
-    if (!bytecode)
+    PyObject *tmp = PyList_AsTuple(consts); /* PyCode_New requires a tuple */
+    if (tmp == NULL) {
         goto error;
-
-    tmp = PyList_AsTuple(consts); /* PyCode_New requires a tuple */
-    if (!tmp)
-        goto error;
+    }
     Py_DECREF(consts);
     consts = tmp;
     if (!merge_const_tuple(c, &consts)) {
@@ -5958,124 +5118,22 @@ makecode(struct compiler *c, struct assembler *a)
     posonlyargcount = Py_SAFE_DOWNCAST(c->u->u_posonlyargcount, Py_ssize_t, int);
     posorkeywordargcount = Py_SAFE_DOWNCAST(c->u->u_argcount, Py_ssize_t, int);
     kwonlyargcount = Py_SAFE_DOWNCAST(c->u->u_kwonlyargcount, Py_ssize_t, int);
-    maxdepth = stackdepth(c);
     if (maxdepth < 0) {
         goto error;
     }
     co = PyCode_NewWithPosOnlyArgs(posonlyargcount+posorkeywordargcount,
                                    posonlyargcount, kwonlyargcount, nlocals_int, 
-                                   maxdepth, flags, bytecode, consts, names,
+                                   maxdepth, flags, assembler->a_bytecode, consts, names,
                                    varnames, freevars, cellvars, c->c_filename,
-                                   c->u->u_name, c->u->u_firstlineno, a->a_lnotab);
+                                   c->u->u_name, c->u->u_firstlineno, assembler->a_lnotab);
  error:
+    _Py_FreeAssembler(assembler);
     Py_XDECREF(consts);
     Py_XDECREF(names);
     Py_XDECREF(varnames);
     Py_XDECREF(name);
     Py_XDECREF(freevars);
     Py_XDECREF(cellvars);
-    Py_XDECREF(bytecode);
     return co;
 }
 
-
-/* For debugging purposes only */
-#if 0
-static void
-dump_instr(const struct instr *i)
-{
-    const char *jrel = i->i_jrel ? "jrel " : "";
-    const char *jabs = i->i_jabs ? "jabs " : "";
-    char arg[128];
-
-    *arg = '\0';
-    if (HAS_ARG(i->i_opcode)) {
-        sprintf(arg, "arg: %d ", i->i_oparg);
-    }
-    fprintf(stderr, "line: %d, opcode: %d %s%s%s\n",
-                    i->i_lineno, i->i_opcode, arg, jabs, jrel);
-}
-
-static void
-dump_basicblock(const basicblock *b)
-{
-    const char *seen = b->b_seen ? "seen " : "";
-    const char *b_return = b->b_return ? "return " : "";
-    fprintf(stderr, "used: %d, depth: %d, offset: %d %s%s\n",
-        b->b_iused, b->b_startdepth, b->b_offset, seen, b_return);
-    if (b->b_instr) {
-        int i;
-        for (i = 0; i < b->b_iused; i++) {
-            fprintf(stderr, "  [%02d] ", i);
-            dump_instr(b->b_instr + i);
-        }
-    }
-}
-#endif
-
-static PyCodeObject *
-assemble(struct compiler *c, int addNone)
-{
-    basicblock *b, *entryblock;
-    struct assembler a;
-    int i, j, nblocks;
-    PyCodeObject *co = NULL;
-
-    /* Make sure every block that falls off the end returns None.
-       XXX NEXT_BLOCK() isn't quite right, because if the last
-       block ends with a jump or return b_next shouldn't set.
-     */
-    if (!c->u->u_curblock->b_return) {
-        NEXT_BLOCK(c);
-        if (addNone)
-            ADDOP_LOAD_CONST(c, Py_None);
-        ADDOP(c, RETURN_VALUE);
-    }
-
-    nblocks = 0;
-    entryblock = NULL;
-    for (b = c->u->u_blocks; b != NULL; b = b->b_list) {
-        nblocks++;
-        entryblock = b;
-    }
-
-    /* Set firstlineno if it wasn't explicitly set. */
-    if (!c->u->u_firstlineno) {
-        if (entryblock && entryblock->b_instr && entryblock->b_instr->i_lineno)
-            c->u->u_firstlineno = entryblock->b_instr->i_lineno;
-        else
-            c->u->u_firstlineno = 1;
-    }
-    if (!assemble_init(&a, nblocks, c->u->u_firstlineno))
-        goto error;
-    dfs(c, entryblock, &a, nblocks);
-
-    /* Can't modify the bytecode after computing jump offsets. */
-    assemble_jump_offsets(&a, c);
-
-    /* Emit code in reverse postorder from dfs. */
-    for (i = a.a_nblocks - 1; i >= 0; i--) {
-        b = a.a_postorder[i];
-        for (j = 0; j < b->b_iused; j++)
-            if (!assemble_emit(&a, &b->b_instr[j]))
-                goto error;
-    }
-
-    if (_PyBytes_Resize(&a.a_lnotab, a.a_lnotab_off) < 0)
-        goto error;
-    if (_PyBytes_Resize(&a.a_bytecode, a.a_offset * sizeof(_Py_CODEUNIT)) < 0)
-        goto error;
-
-    co = makecode(c, &a);
- error:
-    assemble_free(&a);
-    return co;
-}
-
-#undef PyAST_Compile
-PyCodeObject *
-PyAST_Compile(mod_ty mod, const char *filename, PyCompilerFlags *flags,
-              PyArena *arena)
-{
-    return PyAST_CompileEx(mod, filename, flags, -1, arena);
-}
