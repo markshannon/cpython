@@ -18,22 +18,37 @@ swap_blocks(ControlFlowGraph *cfg, int i, int j) {
     }
 }
 
-/** Sort block into a suitable order for emitting code
- *  Each block is immediately followed by its fallthrough, if any.
- */
+/*  Sort block into a suitable order for emitting code: each block
+ *  must be immediately followed by its fallthrough, if any. */
 static void
 sort_blocks(ControlFlowGraph *cfg) {
     assert(cfg->block_count > 0);
     int i = 0;
+
+    // Each iteration of the loop will put together all the blocks
+    // that are fallthrough one after the other until we reach some
+    // other block that is independent (does not fallthrough from
+    // the block which we start from in every iteration). It will also
+    // make sure that we start the next iteration from some block that
+    // has fallthrough blocks itself.
     while (1) {
+        // Fix the order until we found a block that does not
+        // have a fallthrough.
         while (cfg->blocks[i].b_fallthrough > 0) {
             swap_blocks(cfg, i+1, cfg->blocks[i].b_fallthrough);
             i++;
         }
+
+        // Now we are pointing to the first block after the end of
+        // the previous fallthrough chain.
         i++;
         if (i == cfg->block_count) {
             return;
         }
+
+        // Locate the first block from our position that is not the fallthrough
+        // of some other block (because these may get swapped) or unreachable
+        // (in which case we don't need to consider it).
         int j = i;
         while(cfg->blocks[j].is_fallthrough || !cfg->blocks[i].is_reachable) {
             j++;
@@ -41,6 +56,9 @@ sort_blocks(ControlFlowGraph *cfg) {
                 return;
             }
         }
+
+        // Put the block that we found (that is not fallthrough) in our position
+        // and continue from there.
         swap_blocks(cfg, i, j);
     }
 }
@@ -70,7 +88,10 @@ static int branch_oparg(Instruction *inst, int size, int target_address) {
 
 void compute_offsets(ControlFlowGraph *cfg) {
     int offset = 0;
-    /* Initial pass */
+    /* Perform an initial pass that populates the initial values
+     * of the offsets taking into account the number of code units
+     * the bytecode needs. This step does not take into account the
+     * adjustments needed by the presence of branches */
     for (int b = 0; b < cfg->block_count; b++) {
         BasicBlock *bb = &cfg->blocks[b];
         if (!bb->is_reachable) {
@@ -88,6 +109,12 @@ void compute_offsets(ControlFlowGraph *cfg) {
             }
         }
     }
+
+    /* Perform a second pass that fixes the offset taking into account
+     * the size of the instruction size of thearguments of each branch
+     * (in the previous pass we only counted the branch instruction itself).
+     */
+
     int adjust = 1;
     while (adjust) {
         adjust = 0;
@@ -102,13 +129,17 @@ void compute_offsets(ControlFlowGraph *cfg) {
                 inst->assembler_offset += adjust;
                 if (inst->i_flags & INSTRUCTION_IS_BRANCH) {
                     assert(i == bb->b_end-1);
+                    /* Figure out the target of the branch */
                     int target_index = cfg->blocks[inst->i_oparg].b_start;
                     int target_address = cfg->instructions[target_index].assembler_offset;
                     if (target_index > i) {
                         target_address += adjust;
                     }
+                    /* Get the of the opcode argument and calculate its instruction size instruction */
                     int oparg = branch_oparg(inst, bb->assembler_branch_size, target_address);
                     int argsize = instrsize(oparg);
+                    /* Adjust the branch size to the new value and add the difference to the
+                     * current offset adjustment */
                     if (bb->assembler_branch_size != argsize) {
                         assert(bb->assembler_branch_size < argsize);
                         adjust += argsize - bb->assembler_branch_size;
@@ -247,9 +278,9 @@ void dumpBytecode(PyObject *bytecode) {
 
 extern void cfgDump(ControlFlowGraph *cfg);
 
+// Take cfg and produce assembled bytecode and line number table.
 Assembler *assemble(ControlFlowGraph *cfg, int firstline) {
-    // Take cfg and produce assembled bytecode and line number table.
-    
+
     compute_offsets(cfg);
     Assembler *assembler = PyObject_Malloc(sizeof(Assembler));
     if (assembler == NULL) {
@@ -269,10 +300,10 @@ Assembler *assemble(ControlFlowGraph *cfg, int firstline) {
     assembler->a_lineno = firstline;
     assembler->a_lineno_off = 0;
     sort_blocks(cfg);
-    
+
     //Check cfg is still ok
     computeMaxStackDepth(cfg);
-    
+
     if (emit_code(cfg, assembler) != SUCCESS) {
         goto error;
     }
