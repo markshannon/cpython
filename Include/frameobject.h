@@ -17,8 +17,7 @@ typedef struct _frame {
     PyObject_VAR_HEAD
     struct _frame *f_back;      /* previous frame, or NULL */
     PyCodeObject *f_code;       /* code segment */
-    PyObject *f_builtins;       /* builtin symbol table (PyDictObject) */
-    PyObject *f_globals;        /* global symbol table (PyDictObject) */
+    PyFrameDescriptor *f_descriptor; /* Namespaces and names */
     PyObject *f_locals;         /* local symbol table (any mapping) */
     PyObject **f_valuestack;    /* points after the last local */
     /* Next free slot in f_valuestack.  Frame creation sets to f_valuestack.
@@ -57,7 +56,7 @@ PyAPI_FUNC(PyFrameObject *) PyFrame_New(PyThreadState *, PyCodeObject *,
 
 /* only internal use */
 PyFrameObject* _PyFrame_New_NoTrack(PyThreadState *, PyCodeObject *,
-                                    PyObject *, PyObject *);
+                                    PyFrameDescriptor *, PyObject *);
 
 
 /* The rest of the interface is specific for frame objects */

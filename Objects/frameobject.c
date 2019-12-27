@@ -14,13 +14,23 @@
 static PyMemberDef frame_memberlist[] = {
     {"f_back",          T_OBJECT,       OFF(f_back),      READONLY},
     {"f_code",          T_OBJECT,       OFF(f_code),      READONLY},
-    {"f_builtins",      T_OBJECT,       OFF(f_builtins),  READONLY},
-    {"f_globals",       T_OBJECT,       OFF(f_globals),   READONLY},
     {"f_lasti",         T_INT,          OFF(f_lasti),     READONLY},
     {"f_trace_lines",   T_BOOL,         OFF(f_trace_lines), 0},
     {"f_trace_opcodes", T_BOOL,         OFF(f_trace_opcodes), 0},
     {NULL}      /* Sentinel */
 };
+
+static PyObject *
+frame_getglobals(PyFrameObject *f, void *closure) {
+    Py_INCREF(f->f_descriptor->globals);
+    return f->f_descriptor->globals;
+}
+
+static PyObject *
+frame_getbuiltins(PyFrameObject *f, void *closure) {
+    Py_INCREF(f->f_descriptor->builtins);
+    return f->f_descriptor->builtins;
+}
 
 static PyObject *
 frame_getlocals(PyFrameObject *f, void *closure)
@@ -567,6 +577,8 @@ frame_settrace(PyFrameObject *f, PyObject* v, void *closure)
 
 static PyGetSetDef frame_getsetlist[] = {
     {"f_locals",        (getter)frame_getlocals, NULL, NULL},
+    {"f_globals",        (getter)frame_getglobals, NULL, NULL},
+    {"f_builtins",        (getter)frame_getbuiltins, NULL, NULL},
     {"f_lineno",        (getter)frame_getlineno,
                     (setter)frame_setlineno, NULL},
     {"f_trace",         (getter)frame_gettrace, (setter)frame_settrace, NULL},
@@ -642,8 +654,7 @@ frame_dealloc(PyFrameObject *f)
     }
 
     Py_XDECREF(f->f_back);
-    Py_DECREF(f->f_builtins);
-    Py_DECREF(f->f_globals);
+    Py_DECREF(f->f_descriptor);
     Py_CLEAR(f->f_locals);
     Py_CLEAR(f->f_trace);
 
@@ -670,8 +681,7 @@ frame_traverse(PyFrameObject *f, visitproc visit, void *arg)
 
     Py_VISIT(f->f_back);
     Py_VISIT(f->f_code);
-    Py_VISIT(f->f_builtins);
-    Py_VISIT(f->f_globals);
+    Py_VISIT(f->f_descriptor);
     Py_VISIT(f->f_locals);
     Py_VISIT(f->f_trace);
 
@@ -717,6 +727,7 @@ frame_tp_clear(PyFrameObject *f)
         for (p = f->f_valuestack; p < oldtop; p++)
             Py_CLEAR(*p);
     }
+    
     return 0;
 }
 
@@ -809,55 +820,14 @@ PyTypeObject PyFrame_Type = {
     0,                                          /* tp_dict */
 };
 
-_Py_IDENTIFIER(__builtins__);
-
 PyFrameObject* _Py_HOT_FUNCTION
 _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
-                     PyObject *globals, PyObject *locals)
+                     PyFrameDescriptor *descr, PyObject *locals)
 {
     PyFrameObject *back = tstate->frame;
     PyFrameObject *f;
-    PyObject *builtins;
     Py_ssize_t i;
 
-#ifdef Py_DEBUG
-    if (code == NULL || globals == NULL || !PyDict_Check(globals) ||
-        (locals != NULL && !PyMapping_Check(locals))) {
-        PyErr_BadInternalCall();
-        return NULL;
-    }
-#endif
-    if (back == NULL || back->f_globals != globals) {
-        builtins = _PyDict_GetItemIdWithError(globals, &PyId___builtins__);
-        if (builtins) {
-            if (PyModule_Check(builtins)) {
-                builtins = PyModule_GetDict(builtins);
-                assert(builtins != NULL);
-            }
-        }
-        if (builtins == NULL) {
-            if (PyErr_Occurred()) {
-                return NULL;
-            }
-            /* No builtins!              Make up a minimal one
-               Give them 'None', at least. */
-            builtins = PyDict_New();
-            if (builtins == NULL ||
-                PyDict_SetItemString(
-                    builtins, "None", Py_None) < 0)
-                return NULL;
-        }
-        else
-            Py_INCREF(builtins);
-
-    }
-    else {
-        /* If we share the globals, we share the builtins.
-           Save a lookup and a call. */
-        builtins = back->f_builtins;
-        assert(builtins != NULL);
-        Py_INCREF(builtins);
-    }
     if (code->co_zombieframe != NULL) {
         f = code->co_zombieframe;
         code->co_zombieframe = NULL;
@@ -874,7 +844,6 @@ _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
             f = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type,
             extras);
             if (f == NULL) {
-                Py_DECREF(builtins);
                 return NULL;
             }
         }
@@ -887,7 +856,6 @@ _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
                 PyFrameObject *new_f = PyObject_GC_Resize(PyFrameObject, f, extras);
                 if (new_f == NULL) {
                     PyObject_GC_Del(f);
-                    Py_DECREF(builtins);
                     return NULL;
                 }
                 f = new_f;
@@ -904,12 +872,11 @@ _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
         f->f_trace = NULL;
     }
     f->f_stacktop = f->f_valuestack;
-    f->f_builtins = builtins;
+    Py_INCREF(descr);
+    f->f_descriptor = descr;
     Py_XINCREF(back);
     f->f_back = back;
     Py_INCREF(code);
-    Py_INCREF(globals);
-    f->f_globals = globals;
     /* Most functions have CO_NEWLOCALS and CO_OPTIMIZED set. */
     if ((code->co_flags & (CO_NEWLOCALS | CO_OPTIMIZED)) ==
         (CO_NEWLOCALS | CO_OPTIMIZED))
@@ -924,7 +891,7 @@ _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
     }
     else {
         if (locals == NULL)
-            locals = globals;
+            locals = descr->globals;
         Py_INCREF(locals);
         f->f_locals = locals;
     }
@@ -944,7 +911,9 @@ PyFrameObject*
 PyFrame_New(PyThreadState *tstate, PyCodeObject *code,
             PyObject *globals, PyObject *locals)
 {
-    PyFrameObject *f = _PyFrame_New_NoTrack(tstate, code, globals, locals);
+    PyFrameDescriptor *desc = _PyEval_NewFrameDescriptor(globals, NULL, code->co_name, code->co_name);
+    PyFrameObject *f = _PyFrame_New_NoTrack(tstate, code, desc, locals);
+    Py_DECREF(desc);
     if (f)
         _PyObject_GC_TRACK(f);
     return f;
@@ -1215,5 +1184,119 @@ _PyFrame_DebugMallocStats(FILE *out)
     _PyDebugAllocatorStats(out,
                            "free PyFrameObject",
                            numfree, sizeof(PyFrameObject));
+}
+
+/* Frame descriptor */
+
+_Py_IDENTIFIER(__builtins__);
+
+PyObject *_PyEval_BuiltinsFromGlobals(PyObject *globals) {
+    PyObject *builtins = _PyDict_GetItemIdWithError(globals, &PyId___builtins__);
+    if (builtins) {
+        if (PyModule_Check(builtins)) {
+            builtins = PyModule_GetDict(builtins);
+            assert(builtins != NULL);
+        }
+    }
+    if (builtins == NULL) {
+        if (PyErr_Occurred()) {
+            return NULL;
+        }
+        /* No builtins!              Make up a minimal one
+            Give them 'None', at least. */
+        builtins = PyDict_New();
+        if (builtins == NULL ||
+            PyDict_SetItemString(
+                builtins, "None", Py_None) < 0)
+            return NULL;
+    }
+    else
+        Py_INCREF(builtins);
+    return builtins;
+}
+
+static int
+framedescriptor_clear(PyFrameDescriptor *f)
+{
+    Py_CLEAR(f->globals);
+    Py_CLEAR(f->builtins);
+    Py_CLEAR(f->name);
+    Py_CLEAR(f->qualname);
+    return 0;
+}
+
+static void
+framedesciptor_dealloc(PyFrameDescriptor *f)
+{
+    _PyObject_GC_UNTRACK(f);
+    framedescriptor_clear(f);
+
+    PyObject_GC_Del(f);
+}
+
+static int
+framedescriptor_traverse(PyFrameDescriptor *f, visitproc visit, void *arg)
+{
+    Py_VISIT(f->globals);
+    Py_VISIT(f->builtins);
+    Py_VISIT(f->name);
+    Py_VISIT(f->qualname);
+    return 0;
+}
+
+/* This should never be visible at the Python level.
+ * We need it for GC
+ */
+PyTypeObject PyFrameDescriptor_Type = {
+    PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    "frame_descriptor",
+    sizeof(PyFrameDescriptor),
+    0,
+    (destructor)framedesciptor_dealloc,         /* tp_dealloc */
+    0,                                          /* tp_vectorcall_offset */
+    0,                                          /* tp_getattr */
+    0,                                          /* tp_setattr */
+    0,                                          /* tp_as_async */
+    0,                                          /* tp_repr */
+    0,                                          /* tp_as_number */
+    0,                                          /* tp_as_sequence */
+    0,                                          /* tp_as_mapping */
+    0,                                          /* tp_hash */
+    0,                                          /* tp_call */
+    0,                                          /* tp_str */
+    0,                                          /* tp_getattro */
+    0,                                          /* tp_setattro */
+    0,                                          /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC,    /* tp_flags */
+    0,                                          /* tp_doc */
+    (traverseproc)framedescriptor_traverse,     /* tp_traverse */
+    (inquiry)framedescriptor_clear              /* tp_clear */
+};
+
+PyFrameDescriptor *_PyEval_NewFrameDescriptor(
+    PyObject *globals, PyObject *builtins, PyObject *name, PyObject *qualname)
+{
+    PyFrameDescriptor *f = PyObject_GC_New(PyFrameDescriptor, &PyFrameDescriptor_Type);
+    if (f == NULL) {
+        return NULL;
+    }
+    if (builtins == NULL) {
+        builtins = _PyEval_BuiltinsFromGlobals(globals);
+        if (builtins == NULL) {
+            Py_DECREF(f);
+            return NULL;
+        }
+    } else {
+        Py_INCREF(builtins);
+    }
+    f->builtins = builtins;
+    Py_INCREF(globals);
+    f->globals = globals;
+    Py_INCREF(name);
+    f->name = name;
+    Py_INCREF(qualname);
+    f->qualname = qualname;
+    _PyObject_GC_TRACK(f);
+    return f;
 }
 

@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+#include "cpython/frame_descriptor.h"
+
 /* Function objects and code objects should not be confused with each other:
  *
  * Function objects are created by the execution of the 'def' statement.
@@ -19,19 +21,16 @@ extern "C" {
  */
 
 typedef struct {
-    PyObject_HEAD
+    PyFrameDescriptor func_descr;  /* Frame descriptor fields for this function */
     PyObject *func_code;        /* A code object, the __code__ attribute */
-    PyObject *func_globals;     /* A dictionary (other mappings won't do) */
     PyObject *func_defaults;    /* NULL or a tuple */
     PyObject *func_kwdefaults;  /* NULL or a dict */
     PyObject *func_closure;     /* NULL or a tuple of cell objects */
     PyObject *func_doc;         /* The __doc__ attribute, can be anything */
-    PyObject *func_name;        /* The __name__ attribute, a string object */
     PyObject *func_dict;        /* The __dict__ attribute, a dict or NULL */
     PyObject *func_weakreflist; /* List of weak references */
     PyObject *func_module;      /* The __module__ attribute, can be anything */
     PyObject *func_annotations; /* Annotations, a dict or NULL */
-    PyObject *func_qualname;    /* The qualified name */
     vectorcallfunc vectorcall;
 
     /* Invariant:
@@ -60,8 +59,8 @@ PyAPI_FUNC(PyObject *) PyFunction_GetAnnotations(PyObject *);
 PyAPI_FUNC(int) PyFunction_SetAnnotations(PyObject *, PyObject *);
 
 #ifndef Py_LIMITED_API
-PyAPI_FUNC(PyObject *) _PyFunction_Vectorcall(
-    PyObject *func,
+PyObject *_PyFunction_Vectorcall(
+    PyFunctionObject *func,
     PyObject *const *stack,
     size_t nargsf,
     PyObject *kwnames);
@@ -72,7 +71,7 @@ PyAPI_FUNC(PyObject *) _PyFunction_Vectorcall(
 #define PyFunction_GET_CODE(func) \
         (((PyFunctionObject *)func) -> func_code)
 #define PyFunction_GET_GLOBALS(func) \
-        (((PyFunctionObject *)func) -> func_globals)
+        (((PyFunctionObject *)func) -> func_descr.globals)
 #define PyFunction_GET_MODULE(func) \
         (((PyFunctionObject *)func) -> func_module)
 #define PyFunction_GET_DEFAULTS(func) \

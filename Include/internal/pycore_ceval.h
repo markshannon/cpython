@@ -45,13 +45,12 @@ _PyEval_EvalFrame(PyThreadState *tstate, struct _frame *f, int throwflag)
 
 extern PyObject *_PyEval_EvalCode(
     PyThreadState *tstate,
-    PyObject *_co, PyObject *globals, PyObject *locals,
+    PyObject *_co, PyFrameDescriptor *desc, PyObject *locals,
     PyObject *const *args, Py_ssize_t argcount,
     PyObject *const *kwnames, PyObject *const *kwargs,
     Py_ssize_t kwcount, int kwstep,
     PyObject *const *defs, Py_ssize_t defcount,
-    PyObject *kwdefs, PyObject *closure,
-    PyObject *name, PyObject *qualname);
+    PyObject *kwdefs, PyObject *closure);
 
 #ifdef __cplusplus
 }

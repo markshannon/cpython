@@ -30,13 +30,18 @@ PyFunction_NewWithQualName(PyObject *code, PyObject *globals, PyObject *qualname
     Py_INCREF(code);
     op->func_code = code;
     Py_INCREF(globals);
-    op->func_globals = globals;
-    op->func_name = ((PyCodeObject *)code)->co_name;
-    Py_INCREF(op->func_name);
+    op->func_descr.globals = globals;
+    PyObject *builtins = _PyEval_BuiltinsFromGlobals(globals);
+    if (builtins == NULL) {
+        return NULL;
+    }
+    op->func_descr.builtins = builtins;
+    op->func_descr.name = ((PyCodeObject *)code)->co_name;
+    Py_INCREF(op->func_descr.name);
     op->func_defaults = NULL; /* No default arguments */
     op->func_kwdefaults = NULL; /* No keyword only defaults */
     op->func_closure = NULL;
-    op->vectorcall = _PyFunction_Vectorcall;
+    op->vectorcall = (vectorcallfunc)_PyFunction_Vectorcall;
 
     consts = ((PyCodeObject *)code)->co_consts;
     if (PyTuple_Size(consts) >= 1) {
@@ -65,10 +70,10 @@ PyFunction_NewWithQualName(PyObject *code, PyObject *globals, PyObject *qualname
         return NULL;
     }
     if (qualname)
-        op->func_qualname = qualname;
+        op->func_descr.qualname = qualname;
     else
-        op->func_qualname = op->func_name;
-    Py_INCREF(op->func_qualname);
+        op->func_descr.qualname = op->func_descr.name;
+    Py_INCREF(op->func_descr.qualname);
 
     _PyObject_GC_TRACK(op);
     return (PyObject *)op;
@@ -97,7 +102,7 @@ PyFunction_GetGlobals(PyObject *op)
         PyErr_BadInternalCall();
         return NULL;
     }
-    return ((PyFunctionObject *) op) -> func_globals;
+    return ((PyFunctionObject *) op) -> func_descr.globals;
 }
 
 PyObject *
@@ -242,7 +247,7 @@ static PyMemberDef func_memberlist[] = {
     {"__closure__",   T_OBJECT,     OFF(func_closure),
      RESTRICTED|READONLY},
     {"__doc__",       T_OBJECT,     OFF(func_doc), PY_WRITE_RESTRICTED},
-    {"__globals__",   T_OBJECT,     OFF(func_globals),
+    {"__globals__",   T_OBJECT,     OFF(func_descr.globals),
      RESTRICTED|READONLY},
     {"__module__",    T_OBJECT,     OFF(func_module), PY_WRITE_RESTRICTED},
     {NULL}  /* Sentinel */
@@ -284,7 +289,7 @@ func_set_code(PyFunctionObject *op, PyObject *value, void *Py_UNUSED(ignored))
         PyErr_Format(PyExc_ValueError,
                      "%U() requires a code object with %zd free vars,"
                      " not %zd",
-                     op->func_name,
+                     op->func_descr.name,
                      nclosure, nfree);
         return -1;
     }
@@ -296,8 +301,8 @@ func_set_code(PyFunctionObject *op, PyObject *value, void *Py_UNUSED(ignored))
 static PyObject *
 func_get_name(PyFunctionObject *op, void *Py_UNUSED(ignored))
 {
-    Py_INCREF(op->func_name);
-    return op->func_name;
+    Py_INCREF(op->func_descr.name);
+    return op->func_descr.name;
 }
 
 static int
@@ -311,15 +316,15 @@ func_set_name(PyFunctionObject *op, PyObject *value, void *Py_UNUSED(ignored))
         return -1;
     }
     Py_INCREF(value);
-    Py_XSETREF(op->func_name, value);
+    Py_XSETREF(op->func_descr.name, value);
     return 0;
 }
 
 static PyObject *
 func_get_qualname(PyFunctionObject *op, void *Py_UNUSED(ignored))
 {
-    Py_INCREF(op->func_qualname);
-    return op->func_qualname;
+    Py_INCREF(op->func_descr.qualname);
+    return op->func_descr.qualname;
 }
 
 static int
@@ -333,7 +338,7 @@ func_set_qualname(PyFunctionObject *op, PyObject *value, void *Py_UNUSED(ignored
         return -1;
     }
     Py_INCREF(value);
-    Py_XSETREF(op->func_qualname, value);
+    Py_XSETREF(op->func_descr.qualname, value);
     return 0;
 }
 
@@ -556,7 +561,7 @@ func_new_impl(PyTypeObject *type, PyCodeObject *code, PyObject *globals,
 
     if (name != Py_None) {
         Py_INCREF(name);
-        Py_SETREF(newfunc->func_name, name);
+        Py_SETREF(newfunc->func_descr.name, name);
     }
     if (defaults != Py_None) {
         Py_INCREF(defaults);
@@ -574,16 +579,17 @@ static int
 func_clear(PyFunctionObject *op)
 {
     Py_CLEAR(op->func_code);
-    Py_CLEAR(op->func_globals);
+    Py_CLEAR(op->func_descr.globals);
+    Py_CLEAR(op->func_descr.builtins);
+    Py_CLEAR(op->func_descr.name);
+    Py_CLEAR(op->func_descr.qualname);
     Py_CLEAR(op->func_module);
-    Py_CLEAR(op->func_name);
     Py_CLEAR(op->func_defaults);
     Py_CLEAR(op->func_kwdefaults);
     Py_CLEAR(op->func_doc);
     Py_CLEAR(op->func_dict);
     Py_CLEAR(op->func_closure);
     Py_CLEAR(op->func_annotations);
-    Py_CLEAR(op->func_qualname);
     return 0;
 }
 
@@ -602,23 +608,24 @@ static PyObject*
 func_repr(PyFunctionObject *op)
 {
     return PyUnicode_FromFormat("<function %U at %p>",
-                               op->func_qualname, op);
+                               op->func_descr.qualname, op);
 }
 
 static int
 func_traverse(PyFunctionObject *f, visitproc visit, void *arg)
 {
     Py_VISIT(f->func_code);
-    Py_VISIT(f->func_globals);
+    Py_VISIT(f->func_descr.globals);
+    Py_VISIT(f->func_descr.builtins);
     Py_VISIT(f->func_module);
     Py_VISIT(f->func_defaults);
     Py_VISIT(f->func_kwdefaults);
     Py_VISIT(f->func_doc);
-    Py_VISIT(f->func_name);
+    Py_VISIT(f->func_descr.name);
     Py_VISIT(f->func_dict);
     Py_VISIT(f->func_closure);
     Py_VISIT(f->func_annotations);
-    Py_VISIT(f->func_qualname);
+    Py_VISIT(f->func_descr.qualname);
     return 0;
 }
 

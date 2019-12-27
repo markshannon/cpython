@@ -859,6 +859,7 @@ class PyFrameObjectPtr(PyObjectPtr):
             self.f_lasti = int_from_int(self.field('f_lasti'))
             self.co_nlocals = int_from_int(self.co.field('co_nlocals'))
             self.co_varnames = PyTupleObjectPtr.from_pyobject_ptr(self.co.field('co_varnames'))
+            self.f_descriptor = PyObjectPtr(self.field('f_descriptor'))
 
     def iter_locals(self):
         '''
@@ -883,7 +884,7 @@ class PyFrameObjectPtr(PyObjectPtr):
         if self.is_optimized_out():
             return ()
 
-        pyop_globals = self.pyop_field('f_globals')
+        pyop_globals = self.f_descriptor.pyop_field('globals')
         return pyop_globals.iteritems()
 
     def iter_builtins(self):
@@ -894,7 +895,7 @@ class PyFrameObjectPtr(PyObjectPtr):
         if self.is_optimized_out():
             return ()
 
-        pyop_builtins = self.pyop_field('f_builtins')
+        pyop_builtins = self.f_descriptor.pyop_field('builtins')
         return pyop_builtins.iteritems()
 
     def get_var_by_name(self, name):
