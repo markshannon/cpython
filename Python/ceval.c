@@ -1274,7 +1274,8 @@ main_loop:
         /* line-by-line tracing support */
 
         if (_Py_TracingPossible(ceval) &&
-            tstate->c_tracefunc != NULL && !tstate->tracing) {
+            tstate->c_tracefunc != NULL && !tstate->tracing &&
+            _Py_OPCODE(*next_instr) != RETURN_COROUTINE) {
             int err;
             /* see maybe_call_line_trace
                for expository comments */
@@ -3519,6 +3520,32 @@ main_loop:
             DISPATCH();
         }
 
+        case TARGET(RETURN_COROUTINE): {
+            assert(oparg < 3);
+            static const coroutine_maker make_coro_funcs[3] =
+            {
+                PyGen_NewWithQualName,
+                PyCoro_New,
+                PyAsyncGen_New
+            };
+            Py_INCREF(f);
+            f->f_stacktop = stack_pointer;
+            f->f_executing = 0;
+            tstate->frame = f->f_back;
+            Py_CLEAR(f->f_back);
+            PyObject *coro = make_coro_funcs[oparg](
+                f, f->f_descriptor->name, f->f_descriptor->qualname);
+            if (coro == NULL) {
+                f->f_stacktop = NULL;
+                f->f_back = tstate->frame;
+                Py_INCREF(f->f_back);
+                tstate->frame = f;
+                goto error;
+            }
+            _Py_LeaveRecursiveCall(tstate);
+            return coro;
+        }
+
         case TARGET(EXTENDED_ARG): {
             int oldoparg = oparg;
             NEXTOPARG();
@@ -4107,29 +4134,7 @@ _PyEval_EvalCode(PyThreadState *tstate,
 
     /* Handle generator/coroutine/asynchronous generator */
     if (co->co_flags & (CO_GENERATOR | CO_COROUTINE | CO_ASYNC_GENERATOR)) {
-        PyObject *gen;
-        int is_coro = co->co_flags & CO_COROUTINE;
-
-        /* Don't need to keep the reference to f_back, it will be set
-         * when the generator is resumed. */
-        Py_CLEAR(f->f_back);
-
-        /* Create a new generator that owns the ready to run frame
-         * and return that as the value. */
-        if (is_coro) {
-            gen = PyCoro_New(f, desc->name, desc->qualname);
-        } else if (co->co_flags & CO_ASYNC_GENERATOR) {
-            gen = PyAsyncGen_New(f, desc->name, desc->qualname);
-        } else {
-            gen = PyGen_NewWithQualName(f, desc->name, desc->qualname);
-        }
-        if (gen == NULL) {
-            return NULL;
-        }
-
-        _PyObject_GC_TRACK(f);
-
-        return gen;
+        assert(CodeObject_IsNewGen(co));
     }
 
     retval = _PyEval_EvalFrame(tstate, f, 0);
@@ -4161,9 +4166,9 @@ PyEval_EvalCodeEx(PyObject *_co, PyObject *globals, PyObject *locals,
                   PyObject *const *defs, int defcount,
                   PyObject *kwdefs, PyObject *closure)
 {
-    PyFrameDescriptor *desc = _PyEval_NewFrameDescriptor(globals, NULL, 
+    PyFrameDescriptor *desc = _PyEval_NewFrameDescriptor(globals, NULL,
                                                          ((PyCodeObject *)_co)->co_name,  ((PyCodeObject *)_co)->co_name);
-    
+
     PyThreadState *tstate = _PyThreadState_GET();
     PyObject *res = _PyEval_EvalCode(tstate, _co, desc, locals,
                                     args, argcount,

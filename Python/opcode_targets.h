@@ -161,7 +161,7 @@ static void *opcode_targets[256] = {
     &&_unknown_opcode,
     &&TARGET_LOAD_METHOD,
     &&TARGET_CALL_METHOD,
-    &&_unknown_opcode,
+    &&TARGET_RETURN_COROUTINE,
     &&_unknown_opcode,
     &&_unknown_opcode,
     &&_unknown_opcode,

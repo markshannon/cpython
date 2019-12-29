@@ -219,6 +219,8 @@ static int compiler_async_comprehension_generator(
                                       asdl_seq *generators, int gen_index,
                                       expr_ty elt, expr_ty val, int type);
 
+static int compiler_coroutine_preamble(struct compiler *c);
+
 static PyCodeObject *assemble(struct compiler *, int addNone);
 static PyObject *__doc__, *__annotations__;
 
@@ -1121,6 +1123,8 @@ stack_effect(int opcode, int oparg, int jump)
             return 1;
         case LOAD_ASSERTION_ERROR:
             return 1;
+        case RETURN_COROUTINE:
+            return 0;
         default:
             return PY_INVALID_STACK_EFFECT;
     }
@@ -1691,7 +1695,7 @@ compiler_unwind_fblock(struct compiler *c, struct fblockinfo *info,
                 compiler_pop_fblock(c, POP_VALUE, NULL);
             }
             return 1;
-            
+
         case FINALLY_END:
             if (preserve_tos) {
                 ADDOP(c, ROT_FOUR);
@@ -2158,6 +2162,26 @@ compiler_default_arguments(struct compiler *c, arguments_ty args)
 }
 
 static int
+compiler_coroutine_preamble(struct compiler *c) {
+    /* Add pre-amble if generator or coroutine */
+    int coro_type = -1;
+    PySTEntryObject *ste = c->u->u_ste;
+    if (ste->ste_generator && !ste->ste_coroutine) {
+        coro_type = 0;
+    }
+    if (!ste->ste_generator && ste->ste_coroutine) {
+        coro_type = 1;
+    }
+    if (ste->ste_generator && ste->ste_coroutine) {
+        coro_type = 2;
+    }
+    if (coro_type >= 0) {
+        ADDOP_I(c, RETURN_COROUTINE, coro_type);
+    }
+    return 1;
+}
+
+static int
 compiler_function(struct compiler *c, stmt_ty s, int is_async)
 {
     PyCodeObject *co;
@@ -2227,10 +2251,12 @@ compiler_function(struct compiler *c, stmt_ty s, int is_async)
         compiler_exit_scope(c);
         return 0;
     }
-
     c->u->u_argcount = asdl_seq_LEN(args->args);
     c->u->u_posonlyargcount = asdl_seq_LEN(args->posonlyargs);
     c->u->u_kwonlyargcount = asdl_seq_LEN(args->kwonlyargs);
+    if (!compiler_coroutine_preamble(c)) {
+        return 0;
+    }
     VISIT_SEQ_IN_SCOPE(c, stmt, body);
     co = assemble(c, 1);
     qualname = c->u->u_qualname;
@@ -2612,6 +2638,9 @@ compiler_lambda(struct compiler *c, expr_ty e)
     c->u->u_argcount = asdl_seq_LEN(args->args);
     c->u->u_posonlyargcount = asdl_seq_LEN(args->posonlyargs);
     c->u->u_kwonlyargcount = asdl_seq_LEN(args->kwonlyargs);
+    if (!compiler_coroutine_preamble(c)) {
+        return 0;
+    }
     VISIT_IN_SCOPE(c, expr, e->v.Lambda.body);
     if (c->u->u_ste->ste_generator) {
         co = assemble(c, 0);
@@ -4503,7 +4532,9 @@ compiler_comprehension(struct compiler *c, expr_ty e, int type,
                           "an asynchronous function");
         goto error_in_scope;
     }
-
+    if (!compiler_coroutine_preamble(c)) {
+        return 0;
+    }
     if (type != COMP_GENEXP) {
         int op;
         switch (type) {
@@ -4839,9 +4870,9 @@ compiler_with(struct compiler *c, stmt_ty s, int pos)
 
     ADDOP(c, POP_BLOCK);
     compiler_pop_fblock(c, WITH, block);
-    
+
     /* End of body; start the cleanup. */
-    
+
     /* For successful outcome:
      * call __exit__(None, None, None)
      */
@@ -5963,7 +5994,7 @@ makecode(struct compiler *c, struct assembler *a)
         goto error;
     }
     co = PyCode_NewWithPosOnlyArgs(posonlyargcount+posorkeywordargcount,
-                                   posonlyargcount, kwonlyargcount, nlocals_int, 
+                                   posonlyargcount, kwonlyargcount, nlocals_int,
                                    maxdepth, flags, bytecode, consts, names,
                                    varnames, freevars, cellvars, c->c_filename,
                                    c->u->u_name, c->u->u_firstlineno, a->a_lnotab);

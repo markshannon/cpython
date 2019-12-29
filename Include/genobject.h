@@ -50,6 +50,9 @@ PyObject *_PyGen_yf(PyGenObject *);
 PyAPI_FUNC(void) _PyGen_Finalize(PyObject *self);
 
 #ifndef Py_LIMITED_API
+
+typedef PyObject *(*coroutine_maker)(struct _frame *, PyObject *, PyObject *);
+
 typedef struct {
     _PyGenObject_HEAD(cr)
     PyObject *cr_origin;

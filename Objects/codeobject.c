@@ -513,7 +513,7 @@ code_new(PyTypeObject *type, PyObject *args, PyObject *kw)
                                                ourvarnames, ourfreevars,
                                                ourcellvars, filename,
                                                name, firstlineno, lnotab);
-  cleanup: 
+  cleanup:
     Py_XDECREF(ournames);
     Py_XDECREF(ourvarnames);
     Py_XDECREF(ourfreevars);
@@ -1089,4 +1089,9 @@ _PyCode_SetExtra(PyObject *code, Py_ssize_t index, void *extra)
 
     co_extra->ce_extras[index] = extra;
     return 0;
+}
+
+
+int CodeObject_IsNewGen(PyCodeObject *co) {
+    return ((unsigned char *)PyBytes_AS_STRING(co->co_code))[0] == RETURN_COROUTINE;
 }

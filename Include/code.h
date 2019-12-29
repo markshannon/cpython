@@ -173,6 +173,9 @@ PyAPI_FUNC(int) _PyCode_SetExtra(PyObject *code, Py_ssize_t index,
                                  void *extra);
 #endif
 
+/* Temporary */
+int CodeObject_IsNewGen(PyCodeObject *co);
+
 #ifdef __cplusplus
 }
 #endif

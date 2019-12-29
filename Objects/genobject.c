@@ -78,7 +78,7 @@ _PyGen_Finalize(PyObject *self)
        issue a RuntimeWarning. */
     if (gen->gi_code != NULL &&
         ((PyCodeObject *)gen->gi_code)->co_flags & CO_COROUTINE &&
-        gen->gi_frame->f_lasti == -1)
+        gen->gi_frame->f_lasti == 0)
     {
         _PyErr_WarnUnawaitedCoroutine((PyObject *)gen);
     }
@@ -190,7 +190,7 @@ gen_send_ex(PyGenObject *gen, PyObject *arg, int exc, int closing)
         return NULL;
     }
 
-    if (f->f_lasti == -1) {
+    if (f->f_lasti == 0) {
         if (arg && arg != Py_None) {
             const char *msg = "can't send non-None value to a "
                               "just-started generator";
@@ -224,7 +224,6 @@ gen_send_ex(PyGenObject *gen, PyObject *arg, int exc, int closing)
     tstate->exc_info = gen->gi_exc_state.previous_item;
     gen->gi_exc_state.previous_item = NULL;
     gen->gi_running = 0;
-
     /* Don't keep the reference to f_back any longer than necessary.  It
      * may keep a chain of frames alive or it could create a reference
      * cycle. */
