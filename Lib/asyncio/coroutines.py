@@ -90,7 +90,7 @@ class CoroWrapper:
         # Be careful accessing self.gen.frame -- self.gen might not exist.
         gen = getattr(self, 'gen', None)
         frame = getattr(gen, 'gi_frame', None)
-        if frame is not None and frame.f_lasti == -1:
+        if frame is not None and frame.f_lasti < 0:
             msg = f'{self!r} was never yielded from'
             tb = getattr(self, '_source_traceback', ())
             if tb:

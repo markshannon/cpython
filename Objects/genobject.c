@@ -78,7 +78,7 @@ _PyGen_Finalize(PyObject *self)
        issue a RuntimeWarning. */
     if (gen->gi_code != NULL &&
         ((PyCodeObject *)gen->gi_code)->co_flags & CO_COROUTINE &&
-        gen->gi_frame->f_lasti == -1)
+        gen->gi_frame->f_lastinst < _PyCode_FirstInstruction((PyCodeObject *)gen->gi_code))
     {
         _PyErr_WarnUnawaitedCoroutine((PyObject *)gen);
     }
@@ -190,7 +190,7 @@ gen_send_ex(PyGenObject *gen, PyObject *arg, int exc, int closing)
         return NULL;
     }
 
-    if (f->f_lasti == -1) {
+    if (f->f_lastinst < _PyCode_FirstInstruction(f->f_code)) {
         if (arg && arg != Py_None) {
             const char *msg = "can't send non-None value to a "
                               "just-started generator";
@@ -335,18 +335,17 @@ _PyGen_yf(PyGenObject *gen)
     PyFrameObject *f = gen->gi_frame;
 
     if (f && f->f_stacktop) {
-        PyObject *bytecode = f->f_code->co_code;
-        unsigned char *code = (unsigned char *)PyBytes_AS_STRING(bytecode);
+        const _Py_CODEUNIT *code = _PyCode_FirstInstruction(f->f_code);
 
-        if (f->f_lasti < 0) {
+        if (f->f_lastinst < code) {
             /* Return immediately if the frame didn't start yet. YIELD_FROM
                always come after LOAD_CONST: a code object should not start
                with YIELD_FROM */
-            assert(code[0] != YIELD_FROM);
+            assert(_Py_OPCODE(code[0]) != YIELD_FROM);
             return NULL;
         }
 
-        if (code[f->f_lasti + sizeof(_Py_CODEUNIT)] != YIELD_FROM)
+        if (_Py_OPCODE(f->f_lastinst[1]) != YIELD_FROM)
             return NULL;
         yf = f->f_stacktop[-1];
         Py_INCREF(yf);
@@ -452,8 +451,8 @@ _gen_throw(PyGenObject *gen, int close_on_genexit,
             assert(ret == yf);
             Py_DECREF(ret);
             /* Termination repetition of YIELD_FROM */
-            assert(gen->gi_frame->f_lasti >= 0);
-            gen->gi_frame->f_lasti += sizeof(_Py_CODEUNIT);
+            assert(gen->gi_frame->f_lastinst >= _PyCode_FirstInstruction((PyCodeObject *)gen->gi_code));
+            gen->gi_frame->f_lastinst++;
             if (_PyGen_FetchStopIterationValue(&val) == 0) {
                 ret = gen_send_ex(gen, val, 0, 0);
                 Py_DECREF(val);

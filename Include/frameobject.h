@@ -26,13 +26,11 @@ typedef struct _frame {
        to the current stack top. */
     PyObject **f_stacktop;
     PyObject *f_trace;          /* Trace function */
-    char f_trace_lines;         /* Emit per-line trace events? */
-    char f_trace_opcodes;       /* Emit per-opcode trace events? */
 
     /* Borrowed reference to a generator, or NULL */
     PyObject *f_gen;
 
-    int f_lasti;                /* Last instruction if called */
+    const _Py_CODEUNIT *f_lastinst;           /* Last instruction if called */
     /* Call PyFrame_GetLineNumber() instead of reading this field
        directly.  As of 2.3 f_lineno is only valid when tracing is
        active (i.e. when f_trace is set).  At other times we use
@@ -41,6 +39,8 @@ typedef struct _frame {
     int f_lineno;               /* Current line number */
     int f_iblock;               /* index in f_blockstack */
     char f_executing;           /* whether the frame is still executing */
+    char f_trace_lines;         /* Emit per-line trace events? */
+    char f_trace_opcodes;       /* Emit per-opcode trace events? */
     PyTryBlock f_blockstack[CO_MAXBLOCKS]; /* for try and loop blocks */
     PyObject *f_localsplus[1];  /* locals+stack, dynamically sized */
 } PyFrameObject;
@@ -84,6 +84,11 @@ PyAPI_FUNC(void) _PyFrame_DebugMallocStats(FILE *out);
 
 /* Return the line of code the frame is currently executing. */
 PyAPI_FUNC(int) PyFrame_GetLineNumber(PyFrameObject *);
+
+/* Return the index of the last instruction
+ * in the frame that started executing. */
+int
+_PyFrame_GetInstructionIndex(PyFrameObject *f);
 
 #ifdef __cplusplus
 }

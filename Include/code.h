@@ -141,16 +141,17 @@ PyAPI_FUNC(int) PyCode_Addr2Line(PyCodeObject *, int);
 
 /* for internal use only */
 typedef struct _addr_pair {
-        int ap_lower;
-        int ap_upper;
+        const _Py_CODEUNIT *ap_lower;
+        const _Py_CODEUNIT *ap_upper;
+        int line;
 } PyAddrPair;
 
 #ifndef Py_LIMITED_API
 /* Update *bounds to describe the first and one-past-the-last instructions in the
    same line as lasti.  Return the number of that line.
 */
-PyAPI_FUNC(int) _PyCode_CheckLineNumber(PyCodeObject* co,
-                                        int lasti, PyAddrPair *bounds);
+int _PyCode_CheckLineNumber(PyCodeObject* co,
+                            const _Py_CODEUNIT *lasti, PyAddrPair *bounds);
 
 /* Create a comparable key used to compare constants taking in account the
  * object type. It is used to make sure types are not coerced (e.g., float and
@@ -172,6 +173,16 @@ PyAPI_FUNC(int) _PyCode_GetExtra(PyObject *code, Py_ssize_t index,
 PyAPI_FUNC(int) _PyCode_SetExtra(PyObject *code, Py_ssize_t index,
                                  void *extra);
 #endif
+
+static inline int
+_PyAddrPair_WithinBounds(PyAddrPair *bounds, const _Py_CODEUNIT *lasti) {
+    return (lasti >= bounds->ap_lower && lasti < bounds->ap_upper);
+}
+
+static inline const _Py_CODEUNIT *
+_PyCode_FirstInstruction(PyCodeObject *co) {
+    return (_Py_CODEUNIT *)PyBytes_AS_STRING(co->co_code);
+}
 
 #ifdef __cplusplus
 }

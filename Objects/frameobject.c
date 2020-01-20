@@ -16,7 +16,6 @@ static PyMemberDef frame_memberlist[] = {
     {"f_code",          T_OBJECT,       OFF(f_code),      READONLY},
     {"f_builtins",      T_OBJECT,       OFF(f_builtins),  READONLY},
     {"f_globals",       T_OBJECT,       OFF(f_globals),   READONLY},
-    {"f_lasti",         T_INT,          OFF(f_lasti),     READONLY},
     {"f_trace_lines",   T_BOOL,         OFF(f_trace_lines), 0},
     {"f_trace_opcodes", T_BOOL,         OFF(f_trace_opcodes), 0},
     {NULL}      /* Sentinel */
@@ -31,18 +30,42 @@ frame_getlocals(PyFrameObject *f, void *closure)
     return f->f_locals;
 }
 
+
+
+int
+_PyFrame_GetInstructionIndex(PyFrameObject *f)
+{
+    return (f->f_lastinst - _PyCode_FirstInstruction(f->f_code))*sizeof(_Py_CODEUNIT);
+}
+
+static PyObject *
+frame_getlasti(PyFrameObject *f, void *closure)
+{
+    (void)closure;
+    return PyLong_FromLong(_PyFrame_GetInstructionIndex(f));
+}
+
+
+static void
+frame_setlasti(PyFrameObject *f, int lasti) {
+    assert(lasti % sizeof(_Py_CODEUNIT) == 0);
+    f->f_lastinst = _PyCode_FirstInstruction(f->f_code) + lasti/sizeof(_Py_CODEUNIT);
+}
+
 int
 PyFrame_GetLineNumber(PyFrameObject *f)
 {
     if (f->f_trace)
         return f->f_lineno;
     else
-        return PyCode_Addr2Line(f->f_code, f->f_lasti);
+        return PyCode_Addr2Line(f->f_code, _PyFrame_GetInstructionIndex(f));
 }
+
 
 static PyObject *
 frame_getlineno(PyFrameObject *f, void *closure)
 {
+    (void)closure;
     return PyLong_FromLong(PyFrame_GetLineNumber(f));
 }
 
@@ -345,7 +368,6 @@ frame_block_unwind(PyFrameObject *f)
     }
 }
 
-
 /* Setter for f_lineno - you can set f_lineno from within a trace function in
  * order to jump to a given line of code, subject to some restrictions.  Most
  * lines are OK to jump to because they don't make any assumptions about the
@@ -379,12 +401,16 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
                         "lineno must be an integer");
         return -1;
     }
+    int lasti = _PyFrame_GetInstructionIndex(f);
+    printf("Initial lasti: %d\n", lasti);
+    fflush(stdout);
 
-    /* Upon the 'call' trace event of a new frame, f->f_lasti is -1 and
-     * f->f_trace is NULL, check first on the first condition.
+    /* Upon the 'call' trace event of a new frame, f->f_lastinst points before the
+     * start of the code and f->f_trace is NULL,
+     * check first on the first condition.
      * Forbidding jumps from the 'call' event of a new frame is a side effect
      * of allowing to set f_lineno only from trace functions. */
-    if (f->f_lasti == -1) {
+    if (f->f_lastinst < _PyCode_FirstInstruction(f->f_code)) {
         PyErr_Format(PyExc_ValueError,
                      "can't jump from the 'call' trace event of a new frame");
         return -1;
@@ -412,7 +438,7 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
 
     codetracker tracker;
     init_codetracker(&tracker, f->f_code);
-    move_to_addr(&tracker, f->f_lasti);
+    move_to_addr(&tracker, lasti);
     int current_line = tracker.line;
     assert(current_line >= 0);
     int new_lineno;
@@ -450,7 +476,7 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
         }
     }
 
-    if (tracker.code[f->f_lasti] == YIELD_VALUE || tracker.code[f->f_lasti] == YIELD_FROM) {
+    if (tracker.code[lasti] == YIELD_VALUE || tracker.code[lasti] == YIELD_FROM) {
         PyErr_SetString(PyExc_ValueError,
                 "can't jump from a 'yield' statement");
         return -1;
@@ -528,12 +554,13 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
         }
     }
 
-    move_to_addr(&tracker, f->f_lasti);
+    move_to_addr(&tracker, lasti);
     move_to_nearest_start_of_line(&tracker, new_lineno);
 
     /* Finally set the new f_lineno and f_lasti and return OK. */
     f->f_lineno = new_lineno;
-    f->f_lasti = tracker.addr;
+    printf("New lasti: %d\n", tracker.addr);
+    frame_setlasti(f, tracker.addr);
     return 0;
 }
 
@@ -567,6 +594,8 @@ frame_settrace(PyFrameObject *f, PyObject* v, void *closure)
 
 static PyGetSetDef frame_getsetlist[] = {
     {"f_locals",        (getter)frame_getlocals, NULL, NULL},
+
+    {"f_lasti",         (getter)frame_getlasti, NULL, NULL},
     {"f_lineno",        (getter)frame_getlineno,
                     (setter)frame_setlineno, NULL},
     {"f_trace",         (getter)frame_gettrace, (setter)frame_settrace, NULL},
@@ -929,7 +958,7 @@ _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
         f->f_locals = locals;
     }
 
-    f->f_lasti = -1;
+    f->f_lastinst = ((_Py_CODEUNIT *)PyBytes_AS_STRING(code->co_code))-1;
     f->f_lineno = code->co_firstlineno;
     f->f_iblock = 0;
     f->f_executing = 0;

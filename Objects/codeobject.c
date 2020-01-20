@@ -513,7 +513,7 @@ code_new(PyTypeObject *type, PyObject *args, PyObject *kw)
                                                ourvarnames, ourfreevars,
                                                ourcellvars, filename,
                                                name, firstlineno, lnotab);
-  cleanup: 
+  cleanup:
     Py_XDECREF(ournames);
     Py_XDECREF(ourvarnames);
     Py_XDECREF(ourfreevars);
@@ -975,10 +975,12 @@ PyCode_Addr2Line(PyCodeObject *co, int addrq)
     return line;
 }
 
+
+
 /* Update *bounds to describe the first and one-past-the-last instructions in
    the same line as lasti.  Return the number of that line. */
 int
-_PyCode_CheckLineNumber(PyCodeObject* co, int lasti, PyAddrPair *bounds)
+_PyCode_CheckLineNumber(PyCodeObject* co, const _Py_CODEUNIT *lasti, PyAddrPair *bounds)
 {
     Py_ssize_t size;
     int addr, line;
@@ -991,22 +993,21 @@ _PyCode_CheckLineNumber(PyCodeObject* co, int lasti, PyAddrPair *bounds)
     line = co->co_firstlineno;
     assert(line > 0);
 
-    /* possible optimization: if f->f_lasti == instr_ub
-       (likely to be a common case) then we already know
-       instr_lb -- if we stored the matching value of p
-       somewhere we could skip the first while loop. */
-
     /* See lnotab_notes.txt for the description of
        co_lnotab.  A point to remember: increments to p
        come in (addr, line) pairs. */
 
-    bounds->ap_lower = 0;
+    assert(lasti != NULL);
+    char *code_start = PyBytes_AsString(co->co_code);
+    int lastoffset = ((char *)lasti) - code_start;
+
+    bounds->ap_lower = (const _Py_CODEUNIT *)code_start;
     while (size > 0) {
-        if (addr + *p > lasti)
+        if (addr + *p > lastoffset)
             break;
         addr += *p++;
         if ((signed char)*p)
-            bounds->ap_lower = addr;
+            bounds->ap_lower = (const _Py_CODEUNIT *)(code_start + addr);
         line += (signed char)*p;
         p++;
         --size;
@@ -1019,10 +1020,10 @@ _PyCode_CheckLineNumber(PyCodeObject* co, int lasti, PyAddrPair *bounds)
                 break;
             p++;
         }
-        bounds->ap_upper = addr;
+        bounds->ap_upper = (const _Py_CODEUNIT *)(code_start + addr);
     }
     else {
-        bounds->ap_upper = INT_MAX;
+        bounds->ap_upper = (const _Py_CODEUNIT *)(code_start + INT_MAX);
     }
 
     return line;

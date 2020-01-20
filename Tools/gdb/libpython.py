@@ -856,9 +856,14 @@ class PyFrameObjectPtr(PyObjectPtr):
             self.co_filename = self.co.pyop_field('co_filename')
 
             self.f_lineno = int_from_int(self.field('f_lineno'))
-            self.f_lasti = int_from_int(self.field('f_lasti'))
+            self.f_lastinst = self.field('f_lastinst')
             self.co_nlocals = int_from_int(self.co.field('co_nlocals'))
             self.co_varnames = PyTupleObjectPtr.from_pyobject_ptr(self.co.field('co_varnames'))
+
+    @property
+    def f_lasti(self):
+        first_inst = self.co.field('ob_sval').address.cast(_type_unsigned_char_ptr())
+        return self.f_lastinst.cast(_type_unsigned_char_ptr()) - first_inst
 
     def iter_locals(self):
         '''
