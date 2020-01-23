@@ -138,7 +138,7 @@ Another way.
     ...
     Traceback (most recent call last):
     [...]
-    TypeError: __build_class__() got multiple values for keyword argument 'metaclass'
+    TypeError: got multiple values for keyword argument 'metaclass'
     >>>
 
 Use a __prepare__ method that returns an instrumented dict.

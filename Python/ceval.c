@@ -76,8 +76,8 @@ static void format_exc_unbound(PyThreadState *tstate, PyCodeObject *co, int opar
 static PyObject * unicode_concatenate(PyThreadState *, PyObject *, PyObject *,
                                       PyFrameObject *, const _Py_CODEUNIT *);
 static PyObject * special_lookup(PyThreadState *, PyObject *, _Py_Identifier *);
-static int check_args_iterable(PyThreadState *, PyObject *func, PyObject *vararg);
-static void format_kwargs_error(PyThreadState *, PyObject *func, PyObject *kwargs);
+static int check_args_iterable(PyThreadState *, PyObject *vararg);
+static void format_kwargs_error(PyThreadState *, PyObject *kwargs);
 static void format_awaitable_error(PyThreadState *, PyTypeObject *, int, int);
 
 #define NAME_ERROR_MSG \
@@ -2822,7 +2822,7 @@ main_loop:
             PyObject *dict = PEEK(oparg);
 
             if (_PyDict_MergeEx(dict, update, 2) < 0) {
-                format_kwargs_error(tstate, PEEK(2 + oparg), update);
+                format_kwargs_error(tstate, update);
                 Py_DECREF(update);
                 goto error;
             }
@@ -3413,7 +3413,7 @@ main_loop:
                         goto error;
                     if (_PyDict_MergeEx(d, kwargs, 2) < 0) {
                         Py_DECREF(d);
-                        format_kwargs_error(tstate, SECOND(), kwargs);
+                        format_kwargs_error(tstate, kwargs);
                         Py_DECREF(kwargs);
                         goto error;
                     }
@@ -3425,7 +3425,7 @@ main_loop:
             callargs = POP();
             func = TOP();
             if (!PyTuple_CheckExact(callargs)) {
-                if (check_args_iterable(tstate, func, callargs) < 0) {
+                if (check_args_iterable(tstate, callargs) < 0) {
                     Py_DECREF(callargs);
                     goto error;
                 }
@@ -5201,27 +5201,23 @@ import_all_from(PyThreadState *tstate, PyObject *locals, PyObject *v)
 }
 
 static int
-check_args_iterable(PyThreadState *tstate, PyObject *func, PyObject *args)
+check_args_iterable(PyThreadState *tstate, PyObject *args)
 {
     if (args->ob_type->tp_iter == NULL && !PySequence_Check(args)) {
         /* check_args_iterable() may be called with a live exception:
          * clear it to prevent calling _PyObject_FunctionStr() with an
          * exception set. */
         PyErr_Clear();
-        PyObject *funcstr = _PyObject_FunctionStr(func);
-        if (funcstr != NULL) {
-            _PyErr_Format(tstate, PyExc_TypeError,
-                          "%U argument after * must be an iterable, not %.200s",
-                          funcstr, Py_TYPE(args)->tp_name);
-            Py_DECREF(funcstr);
-        }
+        _PyErr_Format(tstate, PyExc_TypeError,
+                      "argument after * must be an iterable, not %.200s",
+                      Py_TYPE(args)->tp_name);
         return -1;
     }
     return 0;
 }
 
 static void
-format_kwargs_error(PyThreadState *tstate, PyObject *func, PyObject *kwargs)
+format_kwargs_error(PyThreadState *tstate, PyObject *kwargs)
 {
     /* _PyDict_MergeEx raises attribute
      * error (percolated from an attempt
@@ -5231,29 +5227,21 @@ format_kwargs_error(PyThreadState *tstate, PyObject *func, PyObject *kwargs)
      */
     if (_PyErr_ExceptionMatches(tstate, PyExc_AttributeError)) {
         PyErr_Clear();
-        PyObject *funcstr = _PyObject_FunctionStr(func);
-        if (funcstr != NULL) {
-            _PyErr_Format(
-                tstate, PyExc_TypeError,
-                "%U argument after ** must be a mapping, not %.200s",
-                funcstr, Py_TYPE(kwargs)->tp_name);
-            Py_DECREF(funcstr);
-        }
+        _PyErr_Format(
+            tstate, PyExc_TypeError,
+            "argument after ** must be a mapping, not %.200s",
+            Py_TYPE(kwargs)->tp_name);
     }
     else if (_PyErr_ExceptionMatches(tstate, PyExc_KeyError)) {
         PyObject *exc, *val, *tb;
         _PyErr_Fetch(tstate, &exc, &val, &tb);
         if (val && PyTuple_Check(val) && PyTuple_GET_SIZE(val) == 1) {
             PyErr_Clear();
-            PyObject *funcstr = _PyObject_FunctionStr(func);
-            if (funcstr != NULL) {
-                PyObject *key = PyTuple_GET_ITEM(val, 0);
-                _PyErr_Format(
-                    tstate, PyExc_TypeError,
-                    "%U got multiple values for keyword argument '%S'",
-                    funcstr, key);
-                Py_DECREF(funcstr);
-            }
+            PyObject *key = PyTuple_GET_ITEM(val, 0);
+            _PyErr_Format(
+                tstate, PyExc_TypeError,
+                "got multiple values for keyword argument '%S'",
+                key);
             Py_XDECREF(exc);
             Py_XDECREF(val);
             Py_XDECREF(tb);
