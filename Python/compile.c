@@ -984,6 +984,7 @@ stack_effect(int opcode, int oparg, int jump)
              * the handler if an exception be raised. */
             return jump ? 6 : 1;
         case RETURN_VALUE:
+        case GEN_EXIT:
             return -1;
         case IMPORT_STAR:
             return -1;
@@ -2917,8 +2918,21 @@ compiler_return(struct compiler *c, stmt_ty s)
     else if (!preserve_tos) {
         ADDOP_LOAD_CONST(c, s->v.Return.value->v.Constant.value);
     }
-    ADDOP(c, RETURN_VALUE);
-    NEXT_BLOCK(c);
+
+    if (c->u->u_ste->ste_generator) {
+        basicblock *loop = compiler_new_block(c);
+        if (loop == NULL) {
+            return 0;
+        }
+        compiler_use_next_block(c, loop);
+        ADDOP(c, GEN_EXIT);
+        ADDOP_LOAD_CONST(c, Py_None);
+        ADDOP_JUMP(c, JUMP_ABSOLUTE, loop);
+    }
+    else {
+        ADDOP(c, RETURN_VALUE);
+        NEXT_BLOCK(c);
+    }
 
     return 1;
 }
@@ -6707,7 +6721,20 @@ assemble(struct compiler *c, int addNone)
         c->u->u_lineno = -1;
         if (addNone)
             ADDOP_LOAD_CONST(c, Py_None);
-        ADDOP(c, RETURN_VALUE);
+        if (c->u->u_ste->ste_generator) {
+            basicblock *loop = compiler_new_block(c);
+            if (loop == NULL) {
+                return 0;
+            }
+            compiler_use_next_block(c, loop);
+            ADDOP(c, GEN_EXIT);
+            ADDOP(c, POP_TOP);
+            ADDOP_LOAD_CONST(c, Py_None);
+            ADDOP_JUMP(c, JUMP_ABSOLUTE, loop);
+        }
+        else {
+            ADDOP(c, RETURN_VALUE);
+        }
     }
 
 

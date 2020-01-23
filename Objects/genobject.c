@@ -156,24 +156,6 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
         PyErr_SetString(PyExc_ValueError, msg);
         return PYGEN_ERROR;
     }
-    if (f == NULL || _PyFrameHasCompleted(f)) {
-        if (PyCoro_CheckExact(gen) && !closing) {
-            /* `gen` is an exhausted coroutine: raise an error,
-               except when called from gen_close(), which should
-               always be a silent method. */
-            PyErr_SetString(
-                PyExc_RuntimeError,
-                "cannot reuse already awaited coroutine");
-        }
-        else if (arg && !exc) {
-            /* `gen` is an exhausted generator:
-               only return value if called from send(). */
-            *presult = Py_None;
-            Py_INCREF(*presult);
-            return PYGEN_RETURN;
-        }
-        return PYGEN_ERROR;
-    }
 
     assert(_PyFrame_IsRunnable(f));
     assert(f->f_lasti >= 0 || PyBytes_AS_STRING(f->f_code->co_code)[0] == GEN_START);

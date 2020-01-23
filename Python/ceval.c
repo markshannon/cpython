@@ -2446,6 +2446,13 @@ main_loop:
             goto exiting;
         }
 
+        case TARGET(GEN_EXIT): {
+            retval = POP();
+            assert(f->f_iblock == 0);
+            assert(EMPTY());
+            goto exiting;
+        }
+
         case TARGET(GET_AITER): {
             unaryfunc getter = NULL;
             PyObject *iter = NULL;
