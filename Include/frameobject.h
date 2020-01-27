@@ -84,6 +84,15 @@ PyAPI_FUNC(void) _PyFrame_DebugMallocStats(FILE *out);
 /* Return the line of code the frame is currently executing. */
 PyAPI_FUNC(int) PyFrame_GetLineNumber(PyFrameObject *);
 
+PyFrameObject*
+_PyFrame_NewAndInitialized(PyThreadState *tstate,
+           PyObject *_co, PyFrameDescriptor *desc, PyObject *locals,
+           PyObject *const *args, Py_ssize_t argcount,
+           PyObject *const *kwnames, PyObject *const *kwargs,
+           Py_ssize_t kwcount, int kwstep,
+           PyObject *const *defs, Py_ssize_t defcount,
+           PyObject *kwdefs, PyObject *closure);
+
 #ifdef __cplusplus
 }
 #endif
