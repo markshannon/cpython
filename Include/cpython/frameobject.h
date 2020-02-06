@@ -33,7 +33,7 @@ typedef struct _frame {
     /* Borrowed reference to a generator, or NULL */
     PyObject *f_gen;
 
-    int f_lasti;                /* Last instruction if called */
+    const _Py_CODEUNIT *f_lastinst;     /* Last instruction if called */
     /* Call PyFrame_GetLineNumber() instead of reading this field
        directly.  As of 2.3 f_lineno is only valid when tracing is
        active (i.e. when f_trace is set).  At other times we use
@@ -81,6 +81,12 @@ PyAPI_FUNC(void) _PyFrame_DebugMallocStats(FILE *out);
 
 /* Return the line of code the frame is currently executing. */
 PyAPI_FUNC(int) PyFrame_GetLineNumber(PyFrameObject *);
+
+static inline int
+_PyFrame_GetLasti(PyFrameObject *f)
+{
+    return (int)(((char *)f->f_lastinst) - PyBytes_AS_STRING(f->f_code->co_code));
+}
 
 #ifdef __cplusplus
 }

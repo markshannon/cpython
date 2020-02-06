@@ -840,7 +840,7 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
 #define FAST_DISPATCH() \
     { \
         if (!lltrace && !_Py_TracingPossible(ceval) && !PyDTrace_LINE_ENABLED()) { \
-            f->f_lasti = INSTR_OFFSET(); \
+            f->f_lastinst = next_instr; \
             NEXTOPARG(); \
             goto *opcode_targets[opcode]; \
         } \
@@ -850,7 +850,7 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
 #define FAST_DISPATCH() \
     { \
         if (!_Py_TracingPossible(ceval) && !PyDTrace_LINE_ENABLED()) { \
-            f->f_lasti = INSTR_OFFSET(); \
+            f->f_lastinst = next_instr; \
             NEXTOPARG(); \
             goto *opcode_targets[opcode]; \
         } \
@@ -885,7 +885,7 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
 
 /* The integer overflow is checked by an assertion below. */
 #define INSTR_OFFSET()  \
-    (sizeof(_Py_CODEUNIT) * (int)(next_instr - first_instr))
+    ((int)((next_instr - first_instr) * sizeof(_Py_CODEUNIT)))
 #define NEXTOPARG()  do { \
         _Py_CODEUNIT word = *next_instr; \
         opcode = _Py_OPCODE(word); \
@@ -1126,25 +1126,24 @@ _PyEval_EvalFrameDefault(PyFrameObject *f, int throwflag)
     assert(_Py_IS_ALIGNED(PyBytes_AS_STRING(co->co_code), sizeof(_Py_CODEUNIT)));
     first_instr = (_Py_CODEUNIT *) PyBytes_AS_STRING(co->co_code);
     /*
-       f->f_lasti refers to the index of the last instruction,
-       unless it's -1 in which case next_instr should be first_instr.
+       f->f_lastinst refers to the index of the last instruction,
+       unless it's `&first_instr[-1]` in which case next_instr should be first_instr.
 
-       YIELD_FROM sets f_lasti to itself, in order to repeatedly yield
+       YIELD_FROM sets f_lastinst to itself, in order to repeatedly yield
        multiple values.
 
        When the PREDICT() macros are enabled, some opcode pairs follow in
-       direct succession without updating f->f_lasti.  A successful
+       direct succession without updating f->f_lastinst.  A successful
        prediction effectively links the two codes together as if they
-       were a single new opcode; accordingly,f->f_lasti will point to
+       were a single new opcode; accordingly,f->f_lastinst will point to
        the first code in the pair (for instance, GET_ITER followed by
-       FOR_ITER is effectively a single opcode and f->f_lasti will point
+       FOR_ITER is effectively a single opcode and f->f_lastinst will point
        to the beginning of the combined pair.)
     */
-    assert(f->f_lasti >= -1);
+    assert(f->f_lastinst - first_instr >= -1);
     next_instr = first_instr;
-    if (f->f_lasti >= 0) {
-        assert(f->f_lasti % sizeof(_Py_CODEUNIT) == 0);
-        next_instr += f->f_lasti / sizeof(_Py_CODEUNIT) + 1;
+    if (f->f_lastinst >= first_instr) {
+        next_instr = f->f_lastinst + 1;
     }
     stack_pointer = f->f_stacktop;
     assert(stack_pointer != NULL);
@@ -1260,7 +1259,7 @@ main_loop:
         }
 
     fast_next_opcode:
-        f->f_lasti = INSTR_OFFSET();
+        f->f_lastinst = next_instr;
 
         if (PyDTrace_LINE_ENABLED())
             maybe_dtrace_line(f, &instr_lb, &instr_ub, &instr_prev);
@@ -1279,7 +1278,7 @@ main_loop:
                                         tstate, f,
                                         &instr_lb, &instr_ub, &instr_prev);
             /* Reload possibly changed frame fields */
-            JUMPTO(f->f_lasti);
+            next_instr = f->f_lastinst;
             if (f->f_stacktop != NULL) {
                 stack_pointer = f->f_stacktop;
                 f->f_stacktop = NULL;
@@ -1307,11 +1306,11 @@ main_loop:
         if (lltrace) {
             if (HAS_ARG(opcode)) {
                 printf("%d: %d, %d\n",
-                       f->f_lasti, opcode, oparg);
+                       INSTR_OFFSET(), opcode, oparg);
             }
             else {
                 printf("%d: %d\n",
-                       f->f_lasti, opcode);
+                       INSTR_OFFSET(), opcode);
             }
         }
 #endif
@@ -2076,8 +2075,8 @@ main_loop:
             /* receiver remains on stack, retval is value to be yielded */
             f->f_stacktop = stack_pointer;
             /* and repeat... */
-            assert(f->f_lasti >= (int)sizeof(_Py_CODEUNIT));
-            f->f_lasti -= sizeof(_Py_CODEUNIT);
+            assert(f->f_lastinst > first_instr);
+            f->f_lastinst -= 1;
             goto exiting;
         }
 
@@ -4562,7 +4561,7 @@ maybe_call_line_trace(Py_tracefunc func, PyObject *obj,
     */
     if (frame->f_lasti < *instr_lb || frame->f_lasti >= *instr_ub) {
         PyAddrPair bounds;
-        line = _PyCode_CheckLineNumber(frame->f_code, frame->f_lasti,
+        line = _PyCode_CheckLineNumber(frame->f_code, frame->f_lasti*sizeof(_Py_CODEUNIT),
                                        &bounds);
         *instr_lb = bounds.ap_lower;
         *instr_ub = bounds.ap_upper;
@@ -5438,7 +5437,7 @@ dtrace_function_entry(PyFrameObject *f)
 
     filename = PyUnicode_AsUTF8(f->f_code->co_filename);
     funcname = PyUnicode_AsUTF8(f->f_code->co_name);
-    lineno = PyCode_Addr2Line(f->f_code, f->f_lasti);
+    lineno = PyCode_Addr2Line(f->f_code, f->f_lasti*sizeof(_Py_CODEUNIT));
 
     PyDTrace_FUNCTION_ENTRY((char *)filename, (char *)funcname, lineno);
 }
@@ -5452,7 +5451,7 @@ dtrace_function_return(PyFrameObject *f)
 
     filename = PyUnicode_AsUTF8(f->f_code->co_filename);
     funcname = PyUnicode_AsUTF8(f->f_code->co_name);
-    lineno = PyCode_Addr2Line(f->f_code, f->f_lasti);
+    lineno = PyCode_Addr2Line(f->f_code, f->f_lasti*sizeof(_Py_CODEUNIT));
 
     PyDTrace_FUNCTION_RETURN((char *)filename, (char *)funcname, lineno);
 }
@@ -5470,7 +5469,7 @@ maybe_dtrace_line(PyFrameObject *frame,
     */
     if (frame->f_lasti < *instr_lb || frame->f_lasti >= *instr_ub) {
         PyAddrPair bounds;
-        line = _PyCode_CheckLineNumber(frame->f_code, frame->f_lasti,
+        line = _PyCode_CheckLineNumber(frame->f_code, frame->f_lasti*sizeof(_Py_CODEUNIT),
                                        &bounds);
         *instr_lb = bounds.ap_lower;
         *instr_ub = bounds.ap_upper;

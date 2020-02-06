@@ -1011,11 +1011,6 @@ _PyCode_CheckLineNumber(PyCodeObject* co, int lasti, PyAddrPair *bounds)
     line = co->co_firstlineno;
     assert(line > 0);
 
-    /* possible optimization: if f->f_lasti == instr_ub
-       (likely to be a common case) then we already know
-       instr_lb -- if we stored the matching value of p
-       somewhere we could skip the first while loop. */
-
     /* See lnotab_notes.txt for the description of
        co_lnotab.  A point to remember: increments to p
        come in (addr, line) pairs. */

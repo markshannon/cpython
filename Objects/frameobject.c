@@ -16,7 +16,6 @@ static PyMemberDef frame_memberlist[] = {
     {"f_code",          T_OBJECT,       OFF(f_code),      READONLY},
     {"f_builtins",      T_OBJECT,       OFF(f_builtins),  READONLY},
     {"f_globals",       T_OBJECT,       OFF(f_globals),   READONLY},
-    {"f_lasti",         T_INT,          OFF(f_lasti),     READONLY},
     {"f_trace_lines",   T_BOOL,         OFF(f_trace_lines), 0},
     {"f_trace_opcodes", T_BOOL,         OFF(f_trace_opcodes), 0},
     {NULL}      /* Sentinel */
@@ -31,13 +30,20 @@ frame_getlocals(PyFrameObject *f, void *closure)
     return f->f_locals;
 }
 
+static PyObject *
+frame_getlasti(PyFrameObject *f, void *closure)
+{
+    return PyLong_FromLong(_PyFrame_GetLasti(f));
+}
+
+
 int
 PyFrame_GetLineNumber(PyFrameObject *f)
 {
     if (f->f_trace)
         return f->f_lineno;
     else
-        return PyCode_Addr2Line(f->f_code, f->f_lasti);
+         return PyCode_Addr2Line(f->f_code, _PyFrame_GetLasti(f));
 }
 
 static PyObject *
@@ -45,7 +51,6 @@ frame_getlineno(PyFrameObject *f, void *closure)
 {
     return PyLong_FromLong(PyFrame_GetLineNumber(f));
 }
-
 
 /* Given the index of the effective opcode,
    scan back to construct the oparg with EXTENDED_ARG */
@@ -380,11 +385,11 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
         return -1;
     }
 
-    /* Upon the 'call' trace event of a new frame, f->f_lasti is -1 and
+    /* Upon the 'call' trace event of a new frame, lasti is -1 and
      * f->f_trace is NULL, check first on the first condition.
      * Forbidding jumps from the 'call' event of a new frame is a side effect
      * of allowing to set f_lineno only from trace functions. */
-    if (f->f_lasti == -1) {
+    if (_PyFrame_GetLasti(f) < 0) {
         PyErr_Format(PyExc_ValueError,
                      "can't jump from the 'call' trace event of a new frame");
         return -1;
@@ -412,7 +417,7 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
 
     codetracker tracker;
     init_codetracker(&tracker, f->f_code);
-    move_to_addr(&tracker, f->f_lasti);
+    move_to_addr(&tracker, _PyFrame_GetLasti(f));
     int current_line = tracker.line;
     assert(current_line >= 0);
     int new_lineno;
@@ -450,7 +455,7 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
         }
     }
 
-    if (tracker.code[f->f_lasti] == YIELD_VALUE || tracker.code[f->f_lasti] == YIELD_FROM) {
+    if (tracker.code[_PyFrame_GetLasti(f)] == YIELD_VALUE || tracker.code[_PyFrame_GetLasti(f)] == YIELD_FROM) {
         PyErr_SetString(PyExc_ValueError,
                 "can't jump from a 'yield' statement");
         return -1;
@@ -528,12 +533,12 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
         }
     }
 
-    move_to_addr(&tracker, f->f_lasti);
+    move_to_addr(&tracker, _PyFrame_GetLasti(f));
     move_to_nearest_start_of_line(&tracker, new_lineno);
 
-    /* Finally set the new f_lineno and f_lasti and return OK. */
+    /* Finally set the new f_lineno and f_lastinst and return OK. */
     f->f_lineno = new_lineno;
-    f->f_lasti = tracker.addr;
+    f->f_lastinst = (_Py_CODEUNIT *)(tracker.addr + PyBytes_AS_STRING(f->f_code->co_code));
     return 0;
 }
 
@@ -570,6 +575,7 @@ static PyGetSetDef frame_getsetlist[] = {
     {"f_lineno",        (getter)frame_getlineno,
                     (setter)frame_setlineno, NULL},
     {"f_trace",         (getter)frame_gettrace, (setter)frame_settrace, NULL},
+    {"f_lasti",         (getter)frame_getlasti, NULL, NULL},
     {0}
 };
 
@@ -929,7 +935,7 @@ _PyFrame_New_NoTrack(PyThreadState *tstate, PyCodeObject *code,
         f->f_locals = locals;
     }
 
-    f->f_lasti = -1;
+    f->f_lastinst = ((_Py_CODEUNIT *)PyBytes_AS_STRING(code->co_code)) -1;
     f->f_lineno = code->co_firstlineno;
     f->f_iblock = 0;
     f->f_executing = 0;

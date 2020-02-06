@@ -770,7 +770,7 @@ dump_frame(int fd, PyFrameObject *frame)
     }
 
     /* PyFrame_GetLineNumber() was introduced in Python 2.7.0 and 3.2.0 */
-    lineno = PyCode_Addr2Line(code, frame->f_lasti);
+    lineno = PyCode_Addr2Line(code, frame->f_lasti*sizeof(_Py_CODEUNIT));
     PUTS(fd, ", line ");
     if (lineno >= 0) {
         _Py_DumpDecimal(fd, (unsigned long)lineno);
