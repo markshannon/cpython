@@ -355,8 +355,7 @@ _PyEval_Fini(void)
 void
 PyEval_AcquireLock(void)
 {
-    _PyRuntimeState *runtime = &_PyRuntime;
-    PyThreadState *tstate = _PyRuntimeState_GetThreadState(runtime);
+    PyThreadState *tstate = _PyThreadState_GET();
     ensure_tstate_not_null(__func__, tstate);
 
     take_gil(tstate);
@@ -366,7 +365,7 @@ void
 PyEval_ReleaseLock(void)
 {
     _PyRuntimeState *runtime = &_PyRuntime;
-    PyThreadState *tstate = _PyRuntimeState_GetThreadState(runtime);
+    PyThreadState *tstate = _PyThreadState_GET();
     /* This function must succeed when the current thread state is NULL.
        We therefore avoid PyThreadState_Get() which dumps a fatal error
        in debug mode. */
@@ -419,7 +418,7 @@ _PyEval_ReInitThreads(_PyRuntimeState *runtime)
         return;
     }
     recreate_gil(gil);
-    PyThreadState *tstate = _PyRuntimeState_GetThreadState(runtime);
+    PyThreadState *tstate = _PyThreadState_GET();
     ensure_tstate_not_null(__func__, tstate);
 
     take_gil(tstate);

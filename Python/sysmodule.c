@@ -288,7 +288,7 @@ _PySys_ClearAuditHooks(void)
 {
     /* Must be finalizing to clear hooks */
     _PyRuntimeState *runtime = &_PyRuntime;
-    PyThreadState *ts = _PyRuntimeState_GetThreadState(runtime);
+    PyThreadState *ts = _PyThreadState_GET();
     PyThreadState *finalizing = _PyRuntimeState_GetFinalizing(runtime);
     assert(!ts || finalizing == ts);
     if (!ts || finalizing != ts) {
@@ -318,7 +318,7 @@ int
 PySys_AddAuditHook(Py_AuditHookFunction hook, void *userData)
 {
     _PyRuntimeState *runtime = &_PyRuntime;
-    PyThreadState *tstate = _PyRuntimeState_GetThreadState(runtime);
+    PyThreadState *tstate = _PyThreadState_GET();
 
     /* Invoke existing audit hooks to allow them an opportunity to abort. */
     /* Cannot invoke hooks until we are initialized */

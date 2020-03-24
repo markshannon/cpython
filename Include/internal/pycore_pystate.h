@@ -328,10 +328,6 @@ _Py_ThreadCanHandlePendingCalls(void)
 /* Variable and macro for in-line access to current thread
    and interpreter state */
 
-static inline PyThreadState* _PyRuntimeState_GetThreadState(_PyRuntimeState *runtime) {
-    return (PyThreadState*)_Py_atomic_load_relaxed(&runtime->gilstate.tstate_current);
-}
-
 /* Get the current Python thread state.
 
    Efficient macro reading directly the 'gilstate.tstate_current' atomic
@@ -341,7 +337,7 @@ static inline PyThreadState* _PyRuntimeState_GetThreadState(_PyRuntimeState *run
    The caller must hold the GIL.
 
    See also PyThreadState_Get() and PyThreadState_GET(). */
-#define _PyThreadState_GET() _PyRuntimeState_GetThreadState(&_PyRuntime)
+#define _PyThreadState_GET() ((PyThreadState*)_Py_atomic_load_relaxed(&_PyRuntime.gilstate.tstate_current))
 
 /* Redefine PyThreadState_GET() as an alias to _PyThreadState_GET() */
 #undef PyThreadState_GET
