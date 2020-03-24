@@ -189,9 +189,8 @@ typedef struct _Py_AuditHookEntry {
 
 struct _gilstate_runtime_state {
     int check_enabled;
-    /* Assuming the current thread holds the GIL, this is the
-       PyThreadState for the current thread. */
-    _Py_atomic_address tstate_current;
+    /* This is the PyThreadState for the thread holding the GIL. */
+    _Py_atomic_address gil_holder;
     /* The single PyInterpreterState used by this process'
        GILState implementation
     */
@@ -337,7 +336,7 @@ _Py_ThreadCanHandlePendingCalls(void)
    The caller must hold the GIL.
 
    See also PyThreadState_Get() and PyThreadState_GET(). */
-#define _PyThreadState_GET() ((PyThreadState*)_Py_atomic_load_relaxed(&_PyRuntime.gilstate.tstate_current))
+#define _PyThreadState_GET() _Py_tls_tstate
 
 /* Redefine PyThreadState_GET() as an alias to _PyThreadState_GET() */
 #undef PyThreadState_GET

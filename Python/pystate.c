@@ -32,9 +32,9 @@ extern "C" {
 #endif
 
 #define _PyRuntimeGILState_GetThreadState(gilstate) \
-    ((PyThreadState*)_Py_atomic_load_relaxed(&(gilstate)->tstate_current))
+    ((PyThreadState*)_Py_atomic_load_relaxed(&(gilstate)->gil_holder))
 #define _PyRuntimeGILState_SetThreadState(gilstate, value) \
-    _Py_atomic_store_relaxed(&(gilstate)->tstate_current, \
+    _Py_atomic_store_relaxed(&(gilstate)->gil_holder, \
                              (uintptr_t)(value))
 
 static void
@@ -46,6 +46,7 @@ ensure_tstate_not_null(const char *func, PyThreadState *tstate)
     }
 }
 
+__thread struct _ts *_Py_tls_tstate = NULL;
 
 /* Forward declarations */
 static PyThreadState *_PyGILState_GetThisThreadState(struct _gilstate_runtime_state *gilstate);
@@ -860,6 +861,7 @@ _PyThreadState_DeleteCurrent(PyThreadState *tstate)
     struct _gilstate_runtime_state *gilstate = &tstate->interp->runtime->gilstate;
     tstate_delete_common(tstate, gilstate);
     _PyRuntimeGILState_SetThreadState(gilstate, NULL);
+    _Py_tls_tstate = NULL;
     _PyEval_ReleaseLock(tstate);
     PyMem_RawFree(tstate);
 }
@@ -934,9 +936,11 @@ PyThreadState_Get(void)
 PyThreadState *
 _PyThreadState_Swap(struct _gilstate_runtime_state *gilstate, PyThreadState *newts)
 {
-    PyThreadState *oldts = _PyRuntimeGILState_GetThreadState(gilstate);
+    assert(_PyRuntimeGILState_GetThreadState(gilstate) == _Py_tls_tstate);
+    PyThreadState *oldts = _Py_tls_tstate;
 
     _PyRuntimeGILState_SetThreadState(gilstate, newts);
+    _Py_tls_tstate = newts;
     /* It should not be possible for more than one thread state
        to be used for a thread.  Check this the best we can in debug
        builds.

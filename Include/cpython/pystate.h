@@ -46,6 +46,7 @@ typedef struct _err_stackitem {
 
 } _PyErr_StackItem;
 
+extern __thread struct _ts *_Py_tls_tstate;
 
 // The PyThreadState typedef is in Include/pystate.h.
 struct _ts {
