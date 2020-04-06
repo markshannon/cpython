@@ -13,6 +13,8 @@ extern "C" {
 #define DUP_TOP                   4
 #define DUP_TOP_TWO               5
 #define ROT_FOUR                  6
+#define POP_THRICE                7
+#define SWAP_TOP_THREE            8
 #define NOP                       9
 #define UNARY_POSITIVE           10
 #define UNARY_NEGATIVE           11
@@ -96,6 +98,7 @@ extern "C" {
 #define LOAD_GLOBAL             116
 #define IS_OP                   117
 #define CONTAINS_OP             118
+#define SETUP_EXCEPTION_HANDLER 119
 #define JUMP_IF_NOT_EXC_MATCH   121
 #define SETUP_FINALLY           122
 #define LOAD_FAST               124
@@ -128,11 +131,6 @@ extern "C" {
 #define DICT_MERGE              164
 #define DICT_UPDATE             165
 
-/* EXCEPT_HANDLER is a special, implicit block type which is created when
-   entering an except handler. It is not an opcode but we define it here
-   as we want it to be available to both frameobject.c and ceval.c, while
-   remaining private.*/
-#define EXCEPT_HANDLER 257
 
 #define HAS_ARG(op) ((op) >= HAVE_ARGUMENT)
 

@@ -884,11 +884,14 @@ stack_effect(int opcode, int oparg, int jump)
         case ROT_TWO:
         case ROT_THREE:
         case ROT_FOUR:
+        case SWAP_TOP_THREE:
             return 0;
         case DUP_TOP:
             return 1;
         case DUP_TOP_TWO:
             return 2;
+        case POP_THRICE:
+            return -3;
 
         /* Unary operators */
         case UNARY_POSITIVE:
@@ -955,7 +958,7 @@ stack_effect(int opcode, int oparg, int jump)
             /* 1 in the normal flow.
              * Restore the stack position and push 6 values before jumping to
              * the handler if an exception be raised. */
-            return jump ? 6 : 1;
+            return jump ? 3 : 1;
         case RETURN_VALUE:
             return -1;
         case IMPORT_STAR:
@@ -1038,9 +1041,12 @@ stack_effect(int opcode, int oparg, int jump)
             /* 0 in the normal flow.
              * Restore the stack position and push 6 values before jumping to
              * the handler if an exception be raised. */
-            return jump ? 6 : 0;
+            return jump ? 3 : 0;
         case RERAISE:
             return -3;
+
+        case SETUP_EXCEPTION_HANDLER:
+            return 3;
 
         case WITH_EXCEPT_START:
             return 1;
@@ -1092,7 +1098,7 @@ stack_effect(int opcode, int oparg, int jump)
              * Restore the stack position to the position before the result
              * of __aenter__ and push 6 values before jumping to the handler
              * if an exception be raised. */
-            return jump ? -1 + 6 : 0;
+            return jump ? -1 + 3 : 0;
         case BEFORE_ASYNC_WITH:
             return 1;
         case GET_AITER:
@@ -1102,7 +1108,7 @@ stack_effect(int opcode, int oparg, int jump)
         case GET_YIELD_FROM_ITER:
             return 0;
         case END_ASYNC_FOR:
-            return -7;
+            return -4;
         case FORMAT_VALUE:
             /* If there's a fmt_spec on the stack, we go from 2->1,
                else 1->1. */
@@ -1702,12 +1708,11 @@ compiler_unwind_fblock(struct compiler *c, struct fblockinfo *info,
             if (preserve_tos) {
                 ADDOP(c, ROT_FOUR);
             }
-            ADDOP(c, POP_TOP);
-            ADDOP(c, POP_TOP);
-            ADDOP(c, POP_TOP);
+            ADDOP(c, POP_THRICE);
             if (preserve_tos) {
                 ADDOP(c, ROT_FOUR);
             }
+            ADDOP(c, POP_BLOCK);
             ADDOP(c, POP_EXCEPT);
             return 1;
 
@@ -1735,6 +1740,7 @@ compiler_unwind_fblock(struct compiler *c, struct fblockinfo *info,
             if (preserve_tos) {
                 ADDOP(c, ROT_FOUR);
             }
+            ADDOP(c, POP_BLOCK);
             ADDOP(c, POP_EXCEPT);
             if (info->fb_datum) {
                 ADDOP_LOAD_CONST(c, Py_None);
@@ -2932,12 +2938,13 @@ compiler_continue(struct compiler *c)
 static int
 compiler_try_finally(struct compiler *c, stmt_ty s)
 {
-    basicblock *body, *end, *exit;
+    basicblock *body, *end, *exit, *cleanup;
 
     body = compiler_new_block(c);
     end = compiler_new_block(c);
     exit = compiler_new_block(c);
-    if (body == NULL || end == NULL || exit == NULL)
+    cleanup = compiler_new_block(c);
+    if (body == NULL || end == NULL || exit == NULL || cleanup == NULL)
         return 0;
 
     /* `try` block */
@@ -2958,10 +2965,15 @@ compiler_try_finally(struct compiler *c, stmt_ty s)
     ADDOP_JREL(c, JUMP_FORWARD, exit);
     /* `finally` block */
     compiler_use_next_block(c, end);
+    ADDOP_JREL(c, SETUP_EXCEPTION_HANDLER, cleanup);
     if (!compiler_push_fblock(c, FINALLY_END, end, NULL, NULL))
         return 0;
     VISIT_SEQ(c, stmt, s->v.Try.finalbody);
     compiler_pop_fblock(c, FINALLY_END, end);
+    ADDOP(c, RERAISE);
+    compiler_use_next_block(c, cleanup);
+    ADDOP(c, SWAP_TOP_THREE);
+    ADDOP(c, POP_EXCEPT);
     ADDOP(c, RERAISE);
     compiler_use_next_block(c, exit);
     return 1;
@@ -3000,14 +3012,15 @@ compiler_try_finally(struct compiler *c, stmt_ty s)
 static int
 compiler_try_except(struct compiler *c, stmt_ty s)
 {
-    basicblock *body, *orelse, *except, *end;
+    basicblock *body, *orelse, *except, *end, *cleanup;
     Py_ssize_t i, n;
 
     body = compiler_new_block(c);
     except = compiler_new_block(c);
     orelse = compiler_new_block(c);
     end = compiler_new_block(c);
-    if (body == NULL || except == NULL || orelse == NULL || end == NULL)
+    cleanup = compiler_new_block(c);
+    if (body == NULL || except == NULL || orelse == NULL || end == NULL || cleanup == NULL)
         return 0;
     ADDOP_JREL(c, SETUP_FINALLY, except);
     compiler_use_next_block(c, body);
@@ -3019,6 +3032,7 @@ compiler_try_except(struct compiler *c, stmt_ty s)
     ADDOP_JREL(c, JUMP_FORWARD, orelse);
     n = asdl_seq_LEN(s->v.Try.handlers);
     compiler_use_next_block(c, except);
+    ADDOP_JREL(c, SETUP_EXCEPTION_HANDLER, cleanup);
     for (i = 0; i < n; i++) {
         excepthandler_ty handler = (excepthandler_ty)asdl_seq_GET(
             s->v.Try.handlers, i);
@@ -3033,13 +3047,14 @@ compiler_try_except(struct compiler *c, stmt_ty s)
             VISIT(c, expr, handler->v.ExceptHandler.type);
             ADDOP_JABS(c, JUMP_IF_NOT_EXC_MATCH, except);
         }
-        ADDOP(c, POP_TOP);
         if (handler->v.ExceptHandler.name) {
-            basicblock *cleanup_end, *cleanup_body;
+            ADDOP(c, POP_TOP);
+            basicblock *cleanup_end, *cleanup_body, *cleanup_cleanup;
 
             cleanup_end = compiler_new_block(c);
             cleanup_body = compiler_new_block(c);
-            if (cleanup_end == NULL || cleanup_body == NULL) {
+            cleanup_cleanup = compiler_new_block(c);
+            if (cleanup_end == NULL || cleanup_body == NULL || cleanup_cleanup == NULL) {
                 return 0;
             }
 
@@ -3067,6 +3082,7 @@ compiler_try_except(struct compiler *c, stmt_ty s)
             VISIT_SEQ(c, stmt, handler->v.ExceptHandler.body);
             compiler_pop_fblock(c, HANDLER_CLEANUP, cleanup_body);
             ADDOP(c, POP_BLOCK);
+            ADDOP(c, POP_BLOCK);
             ADDOP(c, POP_EXCEPT);
             /* name = None; del name */
             ADDOP_LOAD_CONST(c, Py_None);
@@ -3076,12 +3092,17 @@ compiler_try_except(struct compiler *c, stmt_ty s)
 
             /* except: */
             compiler_use_next_block(c, cleanup_end);
+            ADDOP_JREL(c, SETUP_EXCEPTION_HANDLER, cleanup_cleanup);
 
             /* name = None; del name */
             ADDOP_LOAD_CONST(c, Py_None);
             compiler_nameop(c, handler->v.ExceptHandler.name, Store);
             compiler_nameop(c, handler->v.ExceptHandler.name, Del);
 
+            ADDOP(c, RERAISE);
+            compiler_use_next_block(c, cleanup_cleanup);
+            ADDOP(c, SWAP_TOP_THREE);
+            ADDOP(c, POP_EXCEPT);
             ADDOP(c, RERAISE);
         }
         else {
@@ -3091,18 +3112,22 @@ compiler_try_except(struct compiler *c, stmt_ty s)
             if (!cleanup_body)
                 return 0;
 
-            ADDOP(c, POP_TOP);
-            ADDOP(c, POP_TOP);
+            ADDOP(c, POP_THRICE);
             compiler_use_next_block(c, cleanup_body);
             if (!compiler_push_fblock(c, HANDLER_CLEANUP, cleanup_body, NULL, NULL))
                 return 0;
             VISIT_SEQ(c, stmt, handler->v.ExceptHandler.body);
             compiler_pop_fblock(c, HANDLER_CLEANUP, cleanup_body);
+            ADDOP(c, POP_BLOCK);
             ADDOP(c, POP_EXCEPT);
             ADDOP_JREL(c, JUMP_FORWARD, end);
         }
         compiler_use_next_block(c, except);
     }
+    ADDOP(c, RERAISE);
+    compiler_use_next_block(c, cleanup);
+    ADDOP(c, SWAP_TOP_THREE);
+    ADDOP(c, POP_EXCEPT);
     ADDOP(c, RERAISE);
     compiler_use_next_block(c, orelse);
     VISIT_SEQ(c, stmt, s->v.Try.orelse);
@@ -4420,11 +4445,12 @@ compiler_async_comprehension_generator(struct compiler *c,
                                       expr_ty elt, expr_ty val, int type)
 {
     comprehension_ty gen;
-    basicblock *start, *if_cleanup, *except;
+    basicblock *start, *if_cleanup, *except, *exit;
     Py_ssize_t i, n;
     start = compiler_new_block(c);
     except = compiler_new_block(c);
     if_cleanup = compiler_new_block(c);
+    exit = compiler_new_block(c);
 
     if (start == NULL || if_cleanup == NULL || except == NULL) {
         return 0;
@@ -4500,6 +4526,8 @@ compiler_async_comprehension_generator(struct compiler *c,
 
     compiler_use_next_block(c, except);
     ADDOP(c, END_ASYNC_FOR);
+
+    compiler_use_next_block(c, exit);
 
     return 1;
 }
@@ -4693,9 +4721,8 @@ compiler_with_except_finish(struct compiler *c) {
     ADDOP_JABS(c, POP_JUMP_IF_TRUE, exit);
     ADDOP(c, RERAISE);
     compiler_use_next_block(c, exit);
-    ADDOP(c, POP_TOP);
-    ADDOP(c, POP_TOP);
-    ADDOP(c, POP_TOP);
+    ADDOP(c, POP_THRICE);
+    ADDOP(c, POP_BLOCK);
     ADDOP(c, POP_EXCEPT);
     ADDOP(c, POP_TOP);
     return 1;
@@ -4728,7 +4755,7 @@ compiler_with_except_finish(struct compiler *c) {
 static int
 compiler_async_with(struct compiler *c, stmt_ty s, int pos)
 {
-    basicblock *block, *final, *exit;
+    basicblock *block, *final, *exit, *cleanup;
     withitem_ty item = asdl_seq_GET(s->v.AsyncWith.items, pos);
 
     assert(s->kind == AsyncWith_kind);
@@ -4741,8 +4768,10 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
     block = compiler_new_block(c);
     final = compiler_new_block(c);
     exit = compiler_new_block(c);
-    if (!block || !final || !exit)
+    cleanup = compiler_new_block(c);
+    if (!block || !final || !exit || !cleanup) {
         return 0;
+    }
 
     /* Evaluate EXPR */
     VISIT(c, expr, item->context_expr);
@@ -4794,14 +4823,20 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
 
     /* For exceptional outcome: */
     compiler_use_next_block(c, final);
+    ADDOP_JREL(c, SETUP_EXCEPTION_HANDLER, cleanup);
 
     ADDOP(c, WITH_EXCEPT_START);
     ADDOP(c, GET_AWAITABLE);
     ADDOP_LOAD_CONST(c, Py_None);
     ADDOP(c, YIELD_FROM);
     compiler_with_except_finish(c);
+    ADDOP_JABS(c, JUMP_ABSOLUTE, exit);
+    compiler_use_next_block(c, cleanup);
+    ADDOP(c, SWAP_TOP_THREE);
+    ADDOP(c, POP_EXCEPT);
+    ADDOP(c, RERAISE);
 
-compiler_use_next_block(c, exit);
+    compiler_use_next_block(c, exit);
     return 1;
 }
 
@@ -4830,7 +4865,7 @@ compiler_use_next_block(c, exit);
 static int
 compiler_with(struct compiler *c, stmt_ty s, int pos)
 {
-    basicblock *block, *final, *exit;
+    basicblock *block, *final, *exit, *cleanup;
     withitem_ty item = asdl_seq_GET(s->v.With.items, pos);
 
     assert(s->kind == With_kind);
@@ -4838,8 +4873,10 @@ compiler_with(struct compiler *c, stmt_ty s, int pos)
     block = compiler_new_block(c);
     final = compiler_new_block(c);
     exit = compiler_new_block(c);
-    if (!block || !final || !exit)
+    cleanup = compiler_new_block(c);
+    if (!block || !final || !exit || !cleanup) {
         return 0;
+    }
 
     /* Evaluate EXPR */
     VISIT(c, expr, item->context_expr);
@@ -4882,9 +4919,15 @@ compiler_with(struct compiler *c, stmt_ty s, int pos)
 
     /* For exceptional outcome: */
     compiler_use_next_block(c, final);
+    ADDOP_JREL(c, SETUP_EXCEPTION_HANDLER, cleanup);
 
     ADDOP(c, WITH_EXCEPT_START);
     compiler_with_except_finish(c);
+    ADDOP_JABS(c, JUMP_ABSOLUTE, exit);
+    compiler_use_next_block(c, cleanup);
+    ADDOP(c, SWAP_TOP_THREE);
+    ADDOP(c, POP_EXCEPT);
+    ADDOP(c, RERAISE);
 
     compiler_use_next_block(c, exit);
     return 1;

@@ -60,6 +60,8 @@ def_op('ROT_THREE', 3)
 def_op('DUP_TOP', 4)
 def_op('DUP_TOP_TWO', 5)
 def_op('ROT_FOUR', 6)
+def_op('POP_THRICE', 7)
+def_op('SWAP_TOP_THREE', 8)
 
 def_op('NOP', 9)
 def_op('UNARY_POSITIVE', 10)
@@ -161,6 +163,7 @@ name_op('LOAD_GLOBAL', 116)     # Index in name list
 
 def_op('IS_OP', 117)
 def_op('CONTAINS_OP', 118)
+jrel_op('SETUP_EXCEPTION_HANDLER', 119)
 
 jabs_op('JUMP_IF_NOT_EXC_MATCH', 121)
 jrel_op('SETUP_FINALLY', 122)   # Distance to target address
