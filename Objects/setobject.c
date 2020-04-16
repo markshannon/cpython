@@ -2615,6 +2615,6 @@ static PyTypeObject _PySetDummy_Type = {
 
 static PyObject _dummy_struct = {
   _PyObject_EXTRA_INIT
-  2, &_PySetDummy_Type
+  2, GC_BITS_INIT, &_PySetDummy_Type
 };
 

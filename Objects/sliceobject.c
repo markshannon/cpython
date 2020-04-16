@@ -90,7 +90,7 @@ PyTypeObject PyEllipsis_Type = {
 
 PyObject _Py_EllipsisObject = {
     _PyObject_EXTRA_INIT
-    1, &PyEllipsis_Type
+    1, GC_BITS_INIT, &PyEllipsis_Type
 };
 
 

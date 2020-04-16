@@ -80,10 +80,11 @@ typedef struct _typeobject PyTypeObject;
 
 /* PyObject_HEAD defines the initial segment of every PyObject. */
 #define PyObject_HEAD                   PyObject ob_base;
+#define GC_BITS_INIT 0
 
 #define PyObject_HEAD_INIT(type)        \
     { _PyObject_EXTRA_INIT              \
-    1, type },
+    1, GC_BITS_INIT, type },
 
 #define PyVarObject_HEAD_INIT(type, size)       \
     { PyObject_HEAD_INIT(type) size },
@@ -104,7 +105,13 @@ typedef struct _typeobject PyTypeObject;
  */
 typedef struct _object {
     _PyObject_HEAD_EXTRA
-    Py_ssize_t ob_refcnt;
+#if SIZEOF_SIZE_T == 8
+    int ob_refcnt;
+    int gc_bits;
+#else
+    short ob_refcnt;
+    short gc_bits;
+#endif
     PyTypeObject *ob_type;
 } PyObject;
 
@@ -400,7 +407,7 @@ static inline void _Py_INCREF(PyObject *op)
 #ifdef Py_REF_DEBUG
     _Py_RefTotal++;
 #endif
-    op->ob_refcnt++;
+    op->ob_refcnt += (op->ob_refcnt >= 0);
 }
 
 #define Py_INCREF(op) _Py_INCREF(_PyObject_CAST(op))
@@ -414,9 +421,10 @@ static inline void _Py_DECREF(
 #ifdef Py_REF_DEBUG
     _Py_RefTotal--;
 #endif
-    if (--op->ob_refcnt != 0) {
+    op->ob_refcnt -= (op->ob_refcnt >= 0);
+    if (op->ob_refcnt != 0) {
 #ifdef Py_REF_DEBUG
-        if (op->ob_refcnt < 0) {
+        if (op->ob_refcnt < 0 && op->ob_refcnt != INT_MIN) {
             _Py_NegativeRefcount(filename, lineno, op);
         }
 #endif
