@@ -29,6 +29,7 @@
 #include "opcode.h"
 #include "pydtrace.h"
 #include "setobject.h"
+#include "binaryoperators.h"
 
 #include <ctype.h>
 
@@ -1711,22 +1712,7 @@ main_loop:
         case TARGET(BINARY_ADD): {
             PyObject *right = POP();
             PyObject *left = TOP();
-            PyObject *sum;
-            /* NOTE(haypo): Please don't try to micro-optimize int+int on
-               CPython using bytecode, it is simply worthless.
-               See http://bugs.python.org/issue21955 and
-               http://bugs.python.org/issue10044 for the discussion. In short,
-               no patch shown any impact on a realistic benchmark, only a minor
-               speedup on microbenchmarks. */
-            if (PyUnicode_CheckExact(left) &&
-                     PyUnicode_CheckExact(right)) {
-                sum = unicode_concatenate(tstate, left, right, f, next_instr);
-                /* unicode_concatenate consumed the ref to left */
-            }
-            else {
-                sum = PyNumber_Add(left, right);
-                Py_DECREF(left);
-            }
+            PyObject *sum = _PyCallBinaryFastFunction(BINARY_OPERATOR_ADD, left, right);
             Py_DECREF(right);
             SET_TOP(sum);
             if (sum == NULL)

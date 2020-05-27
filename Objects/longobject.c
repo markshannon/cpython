@@ -3104,6 +3104,16 @@ long_add(PyLongObject *a, PyLongObject *b)
     return (PyObject *)z;
 }
 
+static inline int single_digit(PyObject *a) {
+    return ((size_t)(Py_SIZE(a) + 1)) < 3;
+}
+
+PyObject *_Py_add_long_long(PyObject *v, PyObject *w) {
+    PyObject *res = long_add((PyLongObject *)v, (PyLongObject *)w);
+    Py_DECREF(v);
+    return res;
+}
+
 static PyObject *
 long_sub(PyLongObject *a, PyLongObject *b)
 {

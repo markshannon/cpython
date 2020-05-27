@@ -551,6 +551,41 @@ float_add(PyObject *v, PyObject *w)
     return PyFloat_FromDouble(a);
 }
 
+inline PyObject *
+float_add_double(PyObject *v, double f) {
+    if (Py_REFCNT(v) == 1) {
+        ((PyFloatObject *)v)->ob_fval += f;
+        return v;
+    }
+    PyObject *res = PyFloat_FromDouble(((PyFloatObject *)v)->ob_fval+f);
+    assert(Py_REFCNT(v) > 1);
+    Py_REFCNT(v)--;
+    return res;
+}
+
+PyObject *_Py_add_long_float(PyObject *v, PyObject *w) {
+    printf("long float add\n");
+    assert(PyLong_CheckExact(v));
+    double f = PyLong_AsDouble(v);
+    Py_DECREF(v);
+    if (f == -1.0 && _PyErr_OCCURRED()) {
+        return NULL;
+    }
+    return PyFloat_FromDouble(((PyFloatObject *)w)->ob_fval+f);
+}
+
+PyObject *_Py_add_float_long(PyObject *v, PyObject *w) {
+    printf("float long add\n");
+    double f = PyLong_AsDouble(w);
+    return float_add_double(v, f);
+}
+
+PyObject *_Py_add_float_float(PyObject *v, PyObject *w) {
+    printf("float float add\n");
+    return float_add_double(v, ((PyFloatObject *)w)->ob_fval);
+}
+
+
 static PyObject *
 float_sub(PyObject *v, PyObject *w)
 {

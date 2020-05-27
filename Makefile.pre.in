@@ -338,6 +338,7 @@ PYTHON_OBJS=	\
 		Python/ast.o \
 		Python/ast_opt.o \
 		Python/ast_unparse.o \
+		Python/binaryoperators.o \
 		Python/bltinmodule.o \
 		Python/ceval.o \
 		Python/codecs.o \
@@ -1005,6 +1006,7 @@ PYTHON_HEADERS= \
 		$(srcdir)/Include/abstract.h \
 		$(srcdir)/Include/asdl.h \
 		$(srcdir)/Include/ast.h \
+		$(srcdir)/Include/binaryoperators.h \
 		$(srcdir)/Include/bitset.h \
 		$(srcdir)/Include/bltinmodule.h \
 		$(srcdir)/Include/boolobject.h \

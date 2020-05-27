@@ -17,6 +17,7 @@
 #include "pycore_pystate.h"       // _PyThreadState_GET()
 #include "pycore_sysmodule.h"     // _PySys_ClearAuditHooks()
 #include "pycore_traceback.h"     // _Py_DumpTracebackThreads()
+#include "binaryoperators.h"
 
 #include "grammar.h"              // PyGrammar_RemoveAccelerators()
 #include <locale.h>               // setlocale()
@@ -574,6 +575,7 @@ pycore_init_types(PyThreadState *tstate)
     PyStatus status;
     int is_main_interp = _Py_IsMainInterpreter(tstate);
 
+    PyBinaryOperators_Init();
     status = _PyGC_Init(tstate);
     if (_PyStatus_EXCEPTION(status)) {
         return status;
