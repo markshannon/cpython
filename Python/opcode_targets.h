@@ -118,7 +118,7 @@ static void *opcode_targets[256] = {
     &&TARGET_LOAD_GLOBAL,
     &&TARGET_IS_OP,
     &&TARGET_CONTAINS_OP,
-    &&_unknown_opcode,
+    &&TARGET_JUMP_BACK,
     &&_unknown_opcode,
     &&TARGET_JUMP_IF_NOT_EXC_MATCH,
     &&TARGET_SETUP_FINALLY,

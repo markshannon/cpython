@@ -1403,7 +1403,8 @@ main_loop:
             if (opcode == SETUP_FINALLY ||
                 opcode == SETUP_WITH ||
                 opcode == BEFORE_ASYNC_WITH ||
-                opcode == YIELD_FROM) {
+                opcode == YIELD_FROM ||
+                opcode == JUMP_BACK) {
                 /* Few cases where we skip running signal handlers and other
                    pending calls:
                    - If we're about to enter the 'with:'. It will prevent
@@ -2240,13 +2241,12 @@ main_loop:
                     goto error;
                 Py_DECREF(receiver);
                 SET_TOP(val);
+                assert(oparg == 2);
+                JUMPBY(oparg);
                 DISPATCH();
             }
             /* receiver remains on stack, retval is value to be yielded */
             f->f_stacktop = stack_pointer;
-            /* and repeat... */
-            assert(f->f_lasti >= (int)sizeof(_Py_CODEUNIT));
-            f->f_lasti -= sizeof(_Py_CODEUNIT);
             goto exiting;
         }
 
@@ -3163,6 +3163,11 @@ main_loop:
 
         case TARGET(JUMP_FORWARD): {
             JUMPBY(oparg);
+            FAST_DISPATCH();
+        }
+
+        case TARGET(JUMP_BACK): {
+            JUMPBY(-oparg);
             FAST_DISPATCH();
         }
 

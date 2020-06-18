@@ -336,10 +336,11 @@ _PyGen_yf(PyGenObject *gen)
                always come after LOAD_CONST: a code object should not start
                with YIELD_FROM */
             assert(code[0] != YIELD_FROM);
+            assert(code[0] != JUMP_BACK);
             return NULL;
         }
 
-        if (code[f->f_lasti + sizeof(_Py_CODEUNIT)] != YIELD_FROM)
+        if (code[f->f_lasti + sizeof(_Py_CODEUNIT)] != JUMP_BACK)
             return NULL;
         yf = f->f_stacktop[-1];
         Py_INCREF(yf);

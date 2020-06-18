@@ -1018,6 +1018,7 @@ stack_effect(int opcode, int oparg, int jump)
         /* Jumps */
         case JUMP_FORWARD:
         case JUMP_ABSOLUTE:
+        case JUMP_BACK:
             return 0;
 
         case JUMP_IF_TRUE_OR_POP:
@@ -1383,7 +1384,7 @@ compiler_addop_i(struct compiler *c, int opcode, Py_ssize_t oparg)
 
        The argument of a concrete bytecode instruction is limited to 8-bit.
        EXTENDED_ARG is used for 16, 24, and 32-bit arguments. */
-    assert(HAS_ARG(opcode));
+    assert(HAS_ARG(opcode) || opcode == YIELD_FROM);
     assert(0 <= oparg && oparg <= 2147483647);
 
     off = compiler_next_instr(c->u->u_curblock);
@@ -1721,7 +1722,8 @@ compiler_unwind_fblock(struct compiler *c, struct fblockinfo *info,
             if (info->fb_type == ASYNC_WITH) {
                 ADDOP(c, GET_AWAITABLE);
                 ADDOP_LOAD_CONST(c, Py_None);
-                ADDOP(c, YIELD_FROM);
+                ADDOP_I(c, YIELD_FROM, 2);;
+                ADDOP_I(c, JUMP_BACK, 4);
             }
             ADDOP(c, POP_TOP);
             return 1;
@@ -2805,7 +2807,8 @@ compiler_async_for(struct compiler *c, stmt_ty s)
     ADDOP_JREL(c, SETUP_FINALLY, except);
     ADDOP(c, GET_ANEXT);
     ADDOP_LOAD_CONST(c, Py_None);
-    ADDOP(c, YIELD_FROM);
+    ADDOP_I(c, YIELD_FROM, 2);;
+    ADDOP_I(c, JUMP_BACK, 4);
     ADDOP(c, POP_BLOCK);  /* for SETUP_FINALLY */
 
     /* Success block for __anext__ */
@@ -4540,7 +4543,8 @@ compiler_async_comprehension_generator(struct compiler *c,
     ADDOP_JREL(c, SETUP_FINALLY, except);
     ADDOP(c, GET_ANEXT);
     ADDOP_LOAD_CONST(c, Py_None);
-    ADDOP(c, YIELD_FROM);
+    ADDOP_I(c, YIELD_FROM, 2);;
+    ADDOP_I(c, JUMP_BACK, 4);
     ADDOP(c, POP_BLOCK);
     VISIT(c, expr, gen->target);
 
@@ -4680,7 +4684,8 @@ compiler_comprehension(struct compiler *c, expr_ty e, int type,
     if (is_async_generator && type != COMP_GENEXP) {
         ADDOP(c, GET_AWAITABLE);
         ADDOP_LOAD_CONST(c, Py_None);
-        ADDOP(c, YIELD_FROM);
+        ADDOP_I(c, YIELD_FROM, 2);;
+        ADDOP_I(c, JUMP_BACK, 4);
     }
 
     return 1;
@@ -4842,7 +4847,8 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
     ADDOP(c, BEFORE_ASYNC_WITH);
     ADDOP(c, GET_AWAITABLE);
     ADDOP_LOAD_CONST(c, Py_None);
-    ADDOP(c, YIELD_FROM);
+    ADDOP_I(c, YIELD_FROM, 2);;
+    ADDOP_I(c, JUMP_BACK, 4);
 
     ADDOP_JREL(c, SETUP_ASYNC_WITH, final);
 
@@ -4878,7 +4884,8 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
         return 0;
     ADDOP(c, GET_AWAITABLE);
     ADDOP_O(c, LOAD_CONST, Py_None, consts);
-    ADDOP(c, YIELD_FROM);
+    ADDOP_I(c, YIELD_FROM, 2);;
+    ADDOP_I(c, JUMP_BACK, 4);
 
     ADDOP(c, POP_TOP);
 
@@ -4890,7 +4897,8 @@ compiler_async_with(struct compiler *c, stmt_ty s, int pos)
     ADDOP(c, WITH_EXCEPT_START);
     ADDOP(c, GET_AWAITABLE);
     ADDOP_LOAD_CONST(c, Py_None);
-    ADDOP(c, YIELD_FROM);
+    ADDOP_I(c, YIELD_FROM, 2);;
+    ADDOP_I(c, JUMP_BACK, 4);
     compiler_with_except_finish(c);
 
 compiler_use_next_block(c, exit);
@@ -5039,7 +5047,8 @@ compiler_visit_expr1(struct compiler *c, expr_ty e)
         VISIT(c, expr, e->v.YieldFrom.value);
         ADDOP(c, GET_YIELD_FROM_ITER);
         ADDOP_LOAD_CONST(c, Py_None);
-        ADDOP(c, YIELD_FROM);
+        ADDOP_I(c, YIELD_FROM, 2);;
+        ADDOP_I(c, JUMP_BACK, 4);
         break;
     case Await_kind:
         if (!IS_TOP_LEVEL_AWAIT(c)){
@@ -5056,7 +5065,8 @@ compiler_visit_expr1(struct compiler *c, expr_ty e)
         VISIT(c, expr, e->v.Await.value);
         ADDOP(c, GET_AWAITABLE);
         ADDOP_LOAD_CONST(c, Py_None);
-        ADDOP(c, YIELD_FROM);
+        ADDOP_I(c, YIELD_FROM, 2);;
+        ADDOP_I(c, JUMP_BACK, 4);
         break;
     case Compare_kind:
         return compiler_compare(c, e);

@@ -96,6 +96,7 @@ extern "C" {
 #define LOAD_GLOBAL             116
 #define IS_OP                   117
 #define CONTAINS_OP             118
+#define JUMP_BACK               119
 #define JUMP_IF_NOT_EXC_MATCH   121
 #define SETUP_FINALLY           122
 #define LOAD_FAST               124
