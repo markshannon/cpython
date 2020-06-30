@@ -82,10 +82,19 @@ typedef long stwodigits; /* signed variant of twodigits */
    aware that ints abuse  ob_size's sign bit.
 */
 
-struct _longobject {
-    PyObject_VAR_HEAD
+typedef struct _bigintobject {
+    PyObject_HEAD
+    Py_ssize_t tagged_size;
     digit ob_digit[1];
-};
+} PyBigIntObject;
+
+struct _smallintobject {
+    PyObject_HEAD
+    Py_ssize_t tagged_value;
+} PySmallIntObject;
+
+
+
 
 PyAPI_FUNC(PyLongObject *) _PyLong_New(Py_ssize_t);
 
