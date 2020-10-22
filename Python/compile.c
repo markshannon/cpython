@@ -2820,7 +2820,7 @@ compiler_async_for(struct compiler *c, stmt_ty s)
 static int
 compiler_while(struct compiler *c, stmt_ty s)
 {
-    basicblock *loop, *orelse, *end, *anchor = NULL;
+    basicblock *loop, *orelse, *end, *body, *anchor = NULL;
     int constant = expr_constant(s->v.While.test);
 
     if (constant == 0) {
@@ -2842,12 +2842,13 @@ compiler_while(struct compiler *c, stmt_ty s)
     }
     loop = compiler_new_block(c);
     end = compiler_new_block(c);
+    body = compiler_new_block(c);
     if (constant == -1) {
         anchor = compiler_new_block(c);
         if (anchor == NULL)
             return 0;
     }
-    if (loop == NULL || end == NULL)
+    if (loop == NULL || end == NULL || body == NULL)
         return 0;
     if (s->v.While.orelse) {
         orelse = compiler_new_block(c);
@@ -2864,12 +2865,16 @@ compiler_while(struct compiler *c, stmt_ty s)
         if (!compiler_jump_if(c, s->v.While.test, anchor, 0))
             return 0;
     }
+    compiler_use_next_block(c, body);
     VISIT_SEQ(c, stmt, s->v.While.body);
-    ADDOP_JUMP(c, JUMP_ABSOLUTE, loop);
-
-    /* XXX should the two POP instructions be in a separate block
-       if there is no else clause ?
-    */
+    if (constant == -1) {
+        SET_LOC(c, s);
+        if (!compiler_jump_if(c, s->v.While.test, body, 1))
+            return 0;
+    }
+    else {
+        ADDOP_JUMP(c, JUMP_ABSOLUTE, loop);
+    }
 
     if (constant == -1)
         compiler_use_next_block(c, anchor);
