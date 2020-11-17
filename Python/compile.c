@@ -42,6 +42,15 @@
 #define COMP_SETCOMP  2
 #define COMP_DICTCOMP 3
 
+typedef enum {
+    ExprLoad=Load,
+    ExprStore = Store,
+    ExprDel=Del,
+    ExprSave=4,
+    ExprRestore=5,
+} expr_context;
+
+
 #define IS_TOP_LEVEL_AWAIT(c) ( \
         (c->c_flags->cf_flags & PyCF_ALLOW_TOP_LEVEL_AWAIT) \
         && (c->u->u_ste->ste_type == ModuleBlock))
@@ -215,7 +224,7 @@ static int compiler_addop_i(struct compiler *, int, Py_ssize_t);
 static int compiler_addop_j(struct compiler *, int, basicblock *);
 static int compiler_error(struct compiler *, const char *);
 static int compiler_warn(struct compiler *, const char *, ...);
-static int compiler_nameop(struct compiler *, identifier, expr_context_ty);
+static int compiler_nameop(struct compiler *, identifier, expr_context);
 
 static PyCodeObject *compiler_mod(struct compiler *, mod_ty);
 static int compiler_visit_stmt(struct compiler *, stmt_ty);
@@ -892,12 +901,14 @@ stack_effect(int opcode, int oparg, int jump)
 
         /* Stack manipulation */
         case POP_TOP:
+        case XPOP_TOP:
             return -1;
         case ROT_TWO:
         case ROT_THREE:
         case ROT_FOUR:
             return 0;
         case DUP_TOP:
+        case COPY:
             return 1;
         case DUP_TOP_TWO:
             return 2;
@@ -1002,6 +1013,7 @@ stack_effect(int opcode, int oparg, int jump)
         case STORE_GLOBAL:
             return -1;
         case DELETE_GLOBAL:
+        case SWAP_GLOBAL:
             return 0;
         case LOAD_CONST:
             return 1;
@@ -1062,6 +1074,7 @@ stack_effect(int opcode, int oparg, int jump)
         case STORE_FAST:
             return -1;
         case DELETE_FAST:
+        case SWAP_FAST:
             return 0;
 
         case RAISE_VARARGS:
@@ -1733,15 +1746,18 @@ compiler_unwind_fblock(struct compiler *c, struct fblockinfo *info,
             if (info->fb_datum) {
                 ADDOP(c, POP_BLOCK);
             }
+            if (info->fb_datum) {
+                if (preserve_tos) {
+                    ADDOP(c, ROT_TWO);
+                }
+                if (!compiler_nameop(c, info->fb_datum, ExprRestore)) {
+                    return 0;
+                }
+            }
             if (preserve_tos) {
                 ADDOP(c, ROT_FOUR);
             }
             ADDOP(c, POP_EXCEPT);
-            if (info->fb_datum) {
-                ADDOP_LOAD_CONST(c, Py_None);
-                compiler_nameop(c, info->fb_datum, Store);
-                compiler_nameop(c, info->fb_datum, Del);
-            }
             return 1;
 
         case POP_VALUE:
@@ -1810,7 +1826,7 @@ compiler_body(struct compiler *c, asdl_stmt_seq *stmts)
             st = (stmt_ty)asdl_seq_GET(stmts, 0);
             assert(st->kind == Expr_kind);
             VISIT(c, expr, st->v.Expr.value);
-            if (!compiler_nameop(c, __doc__, Store))
+            if (!compiler_nameop(c, __doc__, ExprStore))
                 return 0;
         }
     }
@@ -2297,7 +2313,7 @@ compiler_function(struct compiler *c, stmt_ty s, int is_async)
         ADDOP_I(c, CALL_FUNCTION, 1);
     }
 
-    return compiler_nameop(c, name, Store);
+    return compiler_nameop(c, name, ExprStore);
 }
 
 static int
@@ -2339,7 +2355,7 @@ compiler_class(struct compiler *c, stmt_ty s)
         Py_XSETREF(c->u->u_private, s->v.ClassDef.name);
         /* load (global) __name__ ... */
         str = PyUnicode_InternFromString("__name__");
-        if (!str || !compiler_nameop(c, str, Load)) {
+        if (!str || !compiler_nameop(c, str, ExprLoad)) {
             Py_XDECREF(str);
             compiler_exit_scope(c);
             return 0;
@@ -2347,7 +2363,7 @@ compiler_class(struct compiler *c, stmt_ty s)
         Py_DECREF(str);
         /* ... and store it as __module__ */
         str = PyUnicode_InternFromString("__module__");
-        if (!str || !compiler_nameop(c, str, Store)) {
+        if (!str || !compiler_nameop(c, str, ExprStore)) {
             Py_XDECREF(str);
             compiler_exit_scope(c);
             return 0;
@@ -2356,7 +2372,7 @@ compiler_class(struct compiler *c, stmt_ty s)
         assert(c->u->u_qualname);
         ADDOP_LOAD_CONST(c, c->u->u_qualname);
         str = PyUnicode_InternFromString("__qualname__");
-        if (!str || !compiler_nameop(c, str, Store)) {
+        if (!str || !compiler_nameop(c, str, ExprStore)) {
             Py_XDECREF(str);
             compiler_exit_scope(c);
             return 0;
@@ -2386,7 +2402,7 @@ compiler_class(struct compiler *c, stmt_ty s)
             ADDOP_I(c, LOAD_CLOSURE, i);
             ADDOP(c, DUP_TOP);
             str = PyUnicode_InternFromString("__classcell__");
-            if (!str || !compiler_nameop(c, str, Store)) {
+            if (!str || !compiler_nameop(c, str, ExprStore)) {
                 Py_XDECREF(str);
                 compiler_exit_scope(c);
                 return 0;
@@ -2427,7 +2443,7 @@ compiler_class(struct compiler *c, stmt_ty s)
     }
 
     /* 7. store into <name> */
-    if (!compiler_nameop(c, s->v.ClassDef.name, Store))
+    if (!compiler_nameop(c, s->v.ClassDef.name, ExprStore))
         return 0;
     return 1;
 }
@@ -3098,7 +3114,10 @@ compiler_try_except(struct compiler *c, stmt_ty s)
                 return 0;
             }
 
-            compiler_nameop(c, handler->v.ExceptHandler.name, Store);
+            if (!compiler_nameop(c, handler->v.ExceptHandler.name, ExprSave)) {
+                return 0;
+            }
+            ADDOP(c, ROT_TWO);
             ADDOP(c, POP_TOP);
 
             /*
@@ -3122,22 +3141,23 @@ compiler_try_except(struct compiler *c, stmt_ty s)
             VISIT_SEQ(c, stmt, handler->v.ExceptHandler.body);
             compiler_pop_fblock(c, HANDLER_CLEANUP, cleanup_body);
             ADDOP(c, POP_BLOCK);
-            ADDOP(c, POP_EXCEPT);
             /* name = None; del name; # Mark as artificial */
+            if (!compiler_nameop(c, handler->v.ExceptHandler.name, ExprRestore)) {
+                return 0;
+            }
             c->u->u_lineno = -1;
-            ADDOP_LOAD_CONST(c, Py_None);
-            compiler_nameop(c, handler->v.ExceptHandler.name, Store);
-            compiler_nameop(c, handler->v.ExceptHandler.name, Del);
+            ADDOP(c, POP_EXCEPT);
             ADDOP_JUMP(c, JUMP_FORWARD, end);
 
             /* except: */
             compiler_use_next_block(c, cleanup_end);
 
-            /* name = None; del name; # Mark as artificial */
             c->u->u_lineno = -1;
-            ADDOP_LOAD_CONST(c, Py_None);
-            compiler_nameop(c, handler->v.ExceptHandler.name, Store);
-            compiler_nameop(c, handler->v.ExceptHandler.name, Del);
+            ADDOP_I(c, COPY, 7);
+            /* name = None; del name; # Mark as artificial */
+            if (!compiler_nameop(c, handler->v.ExceptHandler.name, ExprRestore)) {
+                return 0;
+            }
 
             ADDOP(c, RERAISE);
         }
@@ -3208,13 +3228,13 @@ compiler_import_as(struct compiler *c, identifier name, identifier asname)
             ADDOP(c, ROT_TWO);
             ADDOP(c, POP_TOP);
         }
-        if (!compiler_nameop(c, asname, Store)) {
+        if (!compiler_nameop(c, asname, ExprStore)) {
             return 0;
         }
         ADDOP(c, POP_TOP);
         return 1;
     }
-    return compiler_nameop(c, asname, Store);
+    return compiler_nameop(c, asname, ExprStore);
 }
 
 static int
@@ -3252,7 +3272,7 @@ compiler_import(struct compiler *c, stmt_ty s)
                 if (tmp == NULL)
                     return 0;
             }
-            r = compiler_nameop(c, tmp, Store);
+            r = compiler_nameop(c, tmp, ExprStore);
             if (dot != -1) {
                 Py_DECREF(tmp);
             }
@@ -3318,7 +3338,7 @@ compiler_from_import(struct compiler *c, stmt_ty s)
         if (alias->asname)
             store_name = alias->asname;
 
-        if (!compiler_nameop(c, store_name, Store)) {
+        if (!compiler_nameop(c, store_name, ExprStore)) {
             return 0;
         }
     }
@@ -3555,7 +3575,7 @@ inplace_binop(operator_ty op)
 }
 
 static int
-compiler_nameop(struct compiler *c, identifier name, expr_context_ty ctx)
+compiler_nameop(struct compiler *c, identifier name, expr_context ctx)
 {
     int op, scope;
     Py_ssize_t arg;
@@ -3568,7 +3588,7 @@ compiler_nameop(struct compiler *c, identifier name, expr_context_ty ctx)
            !_PyUnicode_EqualToASCIIString(name, "True") &&
            !_PyUnicode_EqualToASCIIString(name, "False"));
 
-    if (forbidden_name(c, name, ctx))
+    if (ctx != ExprSave && ctx != ExprRestore && forbidden_name(c, name, (expr_context_ty)ctx))
         return 0;
 
     mangled = _Py_Mangle(c->u->u_private, name);
@@ -3614,6 +3634,25 @@ compiler_nameop(struct compiler *c, identifier name, expr_context_ty ctx)
             break;
         case Store: op = STORE_DEREF; break;
         case Del: op = DELETE_DEREF; break;
+        case ExprSave:
+            /* Should probably emit a warning here? */
+            arg = compiler_add_o(dict, mangled);
+            Py_DECREF(mangled);
+            if (arg < 0)
+                return 0;
+            ADDOP_I(c, STORE_DEREF, arg);
+            ADDOP_LOAD_CONST(c, Py_None);
+            return 1;
+        case ExprRestore:
+            arg = compiler_add_o(dict, mangled);
+            Py_DECREF(mangled);
+            if (arg < 0)
+                return 0;
+            ADDOP_I(c, STORE_DEREF, arg);
+            ADDOP_I(c, DELETE_DEREF, arg);
+            return 1;
+
+            return compiler_error(c, "Cannot use nonlocal variable in except.");
         }
         break;
     case OP_FAST:
@@ -3621,6 +3660,11 @@ compiler_nameop(struct compiler *c, identifier name, expr_context_ty ctx)
         case Load: op = LOAD_FAST; break;
         case Store: op = STORE_FAST; break;
         case Del: op = DELETE_FAST; break;
+        case ExprSave: op = SWAP_FAST; break;
+        case ExprRestore:
+            ADDOP_N(c, SWAP_FAST, mangled, varnames);
+            ADDOP(c, XPOP_TOP);
+            return 1;
         }
         ADDOP_N(c, op, mangled, varnames);
         return 1;
@@ -3629,6 +3673,15 @@ compiler_nameop(struct compiler *c, identifier name, expr_context_ty ctx)
         case Load: op = LOAD_GLOBAL; break;
         case Store: op = STORE_GLOBAL; break;
         case Del: op = DELETE_GLOBAL; break;
+        case ExprSave: op = SWAP_GLOBAL; break;
+        case ExprRestore:
+            arg = compiler_add_o(dict, mangled);
+            Py_DECREF(mangled);
+            if (arg < 0)
+                return 0;
+            ADDOP_I(c, SWAP_GLOBAL, arg);
+            ADDOP(c, XPOP_TOP);
+            return 1;
         }
         break;
     case OP_NAME:
@@ -3636,6 +3689,23 @@ compiler_nameop(struct compiler *c, identifier name, expr_context_ty ctx)
         case Load: op = LOAD_NAME; break;
         case Store: op = STORE_NAME; break;
         case Del: op = DELETE_NAME; break;
+        case ExprSave:
+            /* Is it worth adding a SWAP_NAME opcode ? */
+            arg = compiler_add_o(dict, mangled);
+            Py_DECREF(mangled);
+            if (arg < 0)
+                return 0;
+            ADDOP_I(c, STORE_NAME, arg);
+            ADDOP_LOAD_CONST(c, Py_None);
+            return 1;
+        case ExprRestore:
+            arg = compiler_add_o(dict, mangled);
+            Py_DECREF(mangled);
+            if (arg < 0)
+                return 0;
+            ADDOP_I(c, STORE_NAME, arg);
+            ADDOP_I(c, DELETE_NAME, arg);
+            return 1;
         }
         break;
     }
@@ -5118,7 +5188,7 @@ compiler_visit_expr1(struct compiler *c, expr_ty e)
     case Slice_kind:
         return compiler_slice(c, e);
     case Name_kind:
-        return compiler_nameop(c, e->v.Name.id, e->v.Name.ctx);
+        return compiler_nameop(c, e->v.Name.id, (expr_context)e->v.Name.ctx);
     /* child nodes of List and Tuple will have expr_context set */
     case List_kind:
         return compiler_list(c, e);
@@ -5163,7 +5233,7 @@ compiler_augassign(struct compiler *c, stmt_ty s)
         ADDOP(c, BINARY_SUBSCR);
         break;
     case Name_kind:
-        if (!compiler_nameop(c, e->v.Name.id, Load))
+        if (!compiler_nameop(c, e->v.Name.id, ExprLoad))
             return 0;
         break;
     default:
@@ -5191,7 +5261,7 @@ compiler_augassign(struct compiler *c, stmt_ty s)
         ADDOP(c, STORE_SUBSCR);
         break;
     case Name_kind:
-        return compiler_nameop(c, e->v.Name.id, Store);
+        return compiler_nameop(c, e->v.Name.id, ExprStore);
     default:
         Py_UNREACHABLE();
     }

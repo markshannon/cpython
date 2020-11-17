@@ -13,6 +13,7 @@ extern "C" {
 #define DUP_TOP                   4
 #define DUP_TOP_TWO               5
 #define ROT_FOUR                  6
+#define XPOP_TOP                  7
 #define NOP                       9
 #define UNARY_POSITIVE           10
 #define UNARY_NEGATIVE           11
@@ -77,6 +78,7 @@ extern "C" {
 #define DELETE_ATTR              96
 #define STORE_GLOBAL             97
 #define DELETE_GLOBAL            98
+#define SWAP_GLOBAL              99
 #define LOAD_CONST              100
 #define LOAD_NAME               101
 #define BUILD_TUPLE             102
@@ -96,11 +98,13 @@ extern "C" {
 #define LOAD_GLOBAL             116
 #define IS_OP                   117
 #define CONTAINS_OP             118
+#define COPY                    119
 #define JUMP_IF_NOT_EXC_MATCH   121
 #define SETUP_FINALLY           122
 #define LOAD_FAST               124
 #define STORE_FAST              125
 #define DELETE_FAST             126
+#define SWAP_FAST               127
 #define RAISE_VARARGS           130
 #define CALL_FUNCTION           131
 #define MAKE_FUNCTION           132

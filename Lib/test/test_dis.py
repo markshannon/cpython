@@ -282,24 +282,24 @@ dis_traceback = """\
              18 LOAD_GLOBAL              0 (Exception)
              20 JUMP_IF_NOT_EXC_MATCH    58
              22 POP_TOP
-             24 STORE_FAST               0 (e)
-             26 POP_TOP
-             28 SETUP_FINALLY           20 (to 50)
+             24 SWAP_FAST                0 (e)
+             26 ROT_TWO
+             28 POP_TOP
+             30 SETUP_FINALLY           18 (to 50)
 
-%3d          30 LOAD_FAST                0 (e)
-             32 LOAD_ATTR                1 (__traceback__)
-             34 STORE_FAST               1 (tb)
-             36 POP_BLOCK
-             38 POP_EXCEPT
-             40 LOAD_CONST               0 (None)
-             42 STORE_FAST               0 (e)
-             44 DELETE_FAST              0 (e)
+%3d          32 LOAD_FAST                0 (e)
+             34 LOAD_ATTR                1 (__traceback__)
+             36 STORE_FAST               1 (tb)
+             38 POP_BLOCK
+             40 SWAP_FAST                0 (e)
+             42 XPOP_TOP
+             44 POP_EXCEPT
 
 %3d          46 LOAD_FAST                1 (tb)
              48 RETURN_VALUE
-        >>   50 LOAD_CONST               0 (None)
-             52 STORE_FAST               0 (e)
-             54 DELETE_FAST              0 (e)
+        >>   50 COPY                     7
+             52 SWAP_FAST                0 (e)
+             54 XPOP_TOP
              56 RERAISE
         >>   58 RERAISE
 """ % (TRACEBACK_CODE.co_firstlineno + 1,
@@ -1189,6 +1189,7 @@ class BytecodeTests(unittest.TestCase):
         self.assertEqual(b.current_offset, tb.tb_lasti)
 
     def test_from_traceback_dis(self):
+        self.maxDiff = None
         tb = get_tb()
         b = dis.Bytecode.from_traceback(tb)
         self.assertEqual(b.dis(), dis_traceback)

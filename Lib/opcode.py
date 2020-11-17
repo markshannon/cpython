@@ -60,6 +60,7 @@ def_op('ROT_THREE', 3)
 def_op('DUP_TOP', 4)
 def_op('DUP_TOP_TWO', 5)
 def_op('ROT_FOUR', 6)
+def_op('XPOP_TOP', 7)
 
 def_op('NOP', 9)
 def_op('UNARY_POSITIVE', 10)
@@ -137,6 +138,8 @@ name_op('STORE_ATTR', 95)       # Index in name list
 name_op('DELETE_ATTR', 96)      # ""
 name_op('STORE_GLOBAL', 97)     # ""
 name_op('DELETE_GLOBAL', 98)    # ""
+name_op('SWAP_GLOBAL', 99)      # ""
+
 def_op('LOAD_CONST', 100)       # Index in const list
 hasconst.append(100)
 name_op('LOAD_NAME', 101)       # Index in name list
@@ -161,6 +164,7 @@ name_op('LOAD_GLOBAL', 116)     # Index in name list
 
 def_op('IS_OP', 117)
 def_op('CONTAINS_OP', 118)
+def_op('COPY', 119)
 
 jabs_op('JUMP_IF_NOT_EXC_MATCH', 121)
 jrel_op('SETUP_FINALLY', 122)   # Distance to target address
@@ -171,6 +175,8 @@ def_op('STORE_FAST', 125)       # Local variable number
 haslocal.append(125)
 def_op('DELETE_FAST', 126)      # Local variable number
 haslocal.append(126)
+def_op('SWAP_FAST', 127)     # Local variable number
+haslocal.append(127)
 
 def_op('RAISE_VARARGS', 130)    # Number of raise arguments (1, 2, or 3)
 def_op('CALL_FUNCTION', 131)    # #args

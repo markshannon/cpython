@@ -1634,9 +1634,23 @@ main_loop:
             FAST_DISPATCH();
         }
 
+        case TARGET(SWAP_FAST): {
+            PyObject *tos = TOP();
+            PyObject *value = GETLOCAL(oparg);
+            SET_TOP(value);
+            GETLOCAL(oparg) = tos;
+            FAST_DISPATCH();
+        }
+
         case TARGET(POP_TOP): {
             PyObject *value = POP();
             Py_DECREF(value);
+            FAST_DISPATCH();
+        }
+
+        case TARGET(XPOP_TOP): {
+            PyObject *value = POP();
+            Py_XDECREF(value);
             FAST_DISPATCH();
         }
 
@@ -1685,6 +1699,13 @@ main_loop:
             STACK_GROW(2);
             SET_TOP(top);
             SET_SECOND(second);
+            FAST_DISPATCH();
+        }
+
+        case TARGET(COPY): {
+            PyObject *v = PEEK(oparg);
+            Py_XINCREF(v);
+            PUSH(v);
             FAST_DISPATCH();
         }
 
@@ -2408,7 +2429,7 @@ main_loop:
                 goto error;
             }
             assert(STACK_LEVEL() >= (b)->b_level + 3 &&
-                   STACK_LEVEL() <= (b)->b_level + 4);
+                   STACK_LEVEL() <= (b)->b_level + 5);
             exc_info = tstate->exc_info;
             type = exc_info->exc_type;
             value = exc_info->exc_value;
@@ -2779,6 +2800,34 @@ main_loop:
             PUSH(v);
             DISPATCH();
         }
+
+        case TARGET(SWAP_GLOBAL): {
+            PyObject *name;
+            PyObject *v, *top;
+            name = GETITEM(names, oparg);
+            v = PyObject_GetItem(f->f_globals, name);
+            if (v == NULL) {
+                if (!_PyErr_ExceptionMatches(tstate, PyExc_KeyError)) {
+                    goto error;
+                }
+                _PyErr_Clear(tstate);
+            }
+            top = TOP();
+            if (top != NULL) {
+                if (PyObject_SetItem(f->f_globals, name, top)) {
+                    goto error;
+                }
+                Py_DECREF(top);
+            }
+            else {
+                if (PyObject_DelItem(f->f_globals, name)) {
+                    goto error;
+                }
+            }
+            SET_TOP(v);
+            DISPATCH();
+        }
+
 
         case TARGET(DELETE_FAST): {
             PyObject *v = GETLOCAL(oparg);
