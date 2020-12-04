@@ -231,8 +231,11 @@ class Instruction(_Instruction):
         # Column: Source code line number
         if lineno_width:
             if self.starts_line is not None:
-                lineno_fmt = "%%%dd" % lineno_width
-                fields.append(lineno_fmt % self.starts_line)
+                if self.starts_line == -1:
+                    fields.append(' '*(lineno_width-3) + 'N/A')
+                else:
+                    lineno_fmt = "%%%dd" % lineno_width
+                    fields.append(lineno_fmt % self.starts_line)
             else:
                 fields.append(' ' * lineno_width)
         # Column: Current instruction indicator
@@ -451,11 +454,14 @@ def findlinestarts(code):
 
     Generate pairs (offset, lineno)
     """
-    lastline = None
+    lastline = -1
     for start, end, line in code.co_lines():
-        if line is not None and line != lastline:
+        if line != lastline:
             lastline = line
-            yield start, line
+            if line is None:
+                yield start, -1
+            else:
+                yield start, line
     return
 
 
