@@ -347,7 +347,7 @@ def _get_instructions_bytes(code, varnames=None, names=None, constants=None,
                 argval = cmp_op[arg]
                 argrepr = argval
             elif op in hasfree:
-                argval, argrepr = _get_name_info(arg, cells)
+                argval, argrepr = _get_name_info(arg-len(varnames), cells)
             elif op == FORMAT_VALUE:
                 argval, argrepr = FORMAT_VALUE_CONVERTERS[arg & 0x3]
                 argval = (argval, bool(arg & 0x4))
