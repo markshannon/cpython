@@ -41,6 +41,8 @@ BaseException
       +-- RuntimeError
       |    +-- NotImplementedError
       |    +-- RecursionError
+      |        +-- RecursionOverflow
+      |        +-- StackOverflow
       +-- SyntaxError
       |    +-- IndentationError
       |         +-- TabError

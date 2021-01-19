@@ -1320,6 +1320,18 @@ SimpleExtendsException(PyExc_RuntimeError, RecursionError,
                        "Recursion limit exceeded.");
 
 /*
+ *    RecursionOverflow extends RecursionError
+ */
+SimpleExtendsException(PyExc_RecursionError, RecursionOverflow,
+                       "Python recursion limit exceeded.");
+
+/*
+ *    StackOverflow extends RecursionError
+ */
+SimpleExtendsException(PyExc_RecursionError, StackOverflow,
+                       "C stack overflow.");
+
+/*
  *    NotImplementedError extends RuntimeError
  */
 SimpleExtendsException(PyExc_RuntimeError, NotImplementedError,
@@ -2568,6 +2580,8 @@ _PyExc_Init(PyThreadState *tstate)
     PRE_INIT(EOFError);
     PRE_INIT(RuntimeError);
     PRE_INIT(RecursionError);
+    PRE_INIT(RecursionOverflow);
+    PRE_INIT(StackOverflow);
     PRE_INIT(NotImplementedError);
     PRE_INIT(NameError);
     PRE_INIT(UnboundLocalError);
@@ -2707,6 +2721,8 @@ _PyBuiltins_AddExceptions(PyObject *bltinmod)
     POST_INIT(EOFError);
     POST_INIT(RuntimeError);
     POST_INIT(RecursionError);
+    POST_INIT(RecursionOverflow);
+    POST_INIT(StackOverflow);
     POST_INIT(NotImplementedError);
     POST_INIT(NameError);
     POST_INIT(UnboundLocalError);

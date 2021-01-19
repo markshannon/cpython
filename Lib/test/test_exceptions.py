@@ -1057,7 +1057,7 @@ class ExceptionTests(unittest.TestCase):
         rc, out, err = script_helper.assert_python_failure("-Wd", "-c", code)
         # Check that the program does not fail with SIGABRT.
         self.assertEqual(rc, 1)
-        self.assertIn(b'RecursionError', err)
+        self.assertIn(b'RecursionOverflow', err)
         self.assertIn(b'ResourceWarning', err)
         self.assertIn(b'Done.', out)
 
