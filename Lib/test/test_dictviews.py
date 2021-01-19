@@ -261,7 +261,7 @@ class DictSetTest(unittest.TestCase):
 
     def test_deeply_nested_repr(self):
         d = {}
-        for i in range(sys.getrecursionlimit() + 100):
+        for i in range(50_000):
             d = {42: d.values()}
         self.assertRaises(RecursionError, repr, d)
 

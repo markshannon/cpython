@@ -844,44 +844,6 @@ Py_SetRecursionLimit(int new_limit)
     tstate->interp->ceval.recursion_limit = new_limit;
 }
 
-/* The function _Py_EnterRecursiveCall() only calls _Py_CheckRecursiveCall()
-   if the recursion_depth reaches recursion_limit.
-   If USE_STACKCHECK, the macro decrements recursion_limit
-   to guarantee that _Py_CheckRecursiveCall() is regularly called.
-   Without USE_STACKCHECK, there is no need for this. */
-int
-_Py_CheckRecursiveCall(PyThreadState *tstate, const char *where)
-{
-    int recursion_limit = tstate->interp->ceval.recursion_limit;
-
-#ifdef USE_STACKCHECK
-    tstate->stackcheck_counter = 0;
-    if (PyOS_CheckStack()) {
-        --tstate->recursion_depth;
-        _PyErr_SetString(tstate, PyExc_MemoryError, "Stack overflow");
-        return -1;
-    }
-#endif
-    if (tstate->recursion_headroom) {
-        if (tstate->recursion_depth > recursion_limit + 50) {
-            /* Overflowing while handling an overflow. Give up. */
-            Py_FatalError("Cannot recover from stack overflow.");
-        }
-    }
-    else {
-        if (tstate->recursion_depth > recursion_limit) {
-            tstate->recursion_headroom++;
-            _PyErr_Format(tstate, PyExc_RecursionError,
-                        "maximum recursion depth exceeded%s",
-                        where);
-            tstate->recursion_headroom--;
-            --tstate->recursion_depth;
-            return -1;
-        }
-    }
-    return 0;
-}
-
 
 // PEP 634: Structural Pattern Matching
 
@@ -1616,8 +1578,7 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, PyFrameObject *f, int throwflag)
 
 /* Start of code */
 
-    /* push frame */
-    if (_Py_EnterRecursiveCall(tstate, "")) {
+    if (_Py_EnterRecursivePythonCall(tstate, "")) {
         return NULL;
     }
 
@@ -4582,7 +4543,7 @@ exiting:
 exit_eval_frame:
     if (PyDTrace_FUNCTION_RETURN_ENABLED())
         dtrace_function_return(f);
-    _Py_LeaveRecursiveCall(tstate);
+    --tstate->recursion_depth;
     tstate->frame = f->f_back;
 
     return _Py_CheckFunctionResult(tstate, NULL, retval, __func__);
@@ -5111,9 +5072,7 @@ _PyEval_Vector(PyThreadState *tstate, PyFrameConstructor *con,
         _PyObject_GC_TRACK(f);
     }
     else {
-        ++tstate->recursion_depth;
         Py_DECREF(f);
-        --tstate->recursion_depth;
     }
     return retval;
 }

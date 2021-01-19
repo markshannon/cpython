@@ -883,4 +883,9 @@ extern _invalid_parameter_handler _Py_silent_invalid_parameter_handler;
 #endif
 
 
+/* Stack limits */
+#define STACK_GROWS_DOWN 1
+/* Default stack size is 256k less 3 pages */
+#define STACK_ALLOWANCE ((256-(3*4))*1024)
+
 #endif /* Py_PYPORT_H */

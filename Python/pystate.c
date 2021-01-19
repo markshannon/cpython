@@ -622,7 +622,6 @@ new_threadstate(PyInterpreterState *interp, int init)
     tstate->frame = NULL;
     tstate->recursion_depth = 0;
     tstate->recursion_headroom = 0;
-    tstate->stackcheck_counter = 0;
     tstate->tracing = 0;
     tstate->use_tracing = 0;
     tstate->gilstate_counter = 0;
@@ -631,6 +630,17 @@ new_threadstate(PyInterpreterState *interp, int init)
 
     tstate->dict = NULL;
 
+#ifdef STACK_GROWS_DOWN
+    if (stack_limit_pointer == (char *)((uintptr_t)-1)) {
+        char var;
+        stack_limit_pointer = &var - STACK_ALLOWANCE;
+    }
+#else
+    if (stack_limit_pointer == NULL) {
+        char var;
+        stack_limit_pointer = &var + STACK_ALLOWANCE;
+    }
+#endif
     tstate->curexc_type = NULL;
     tstate->curexc_value = NULL;
     tstate->curexc_traceback = NULL;
@@ -1957,6 +1967,12 @@ _Py_GetConfig(void)
     PyThreadState *tstate = _PyThreadState_GET();
     return _PyInterpreterState_GetConfig(tstate->interp);
 }
+
+#ifdef STACK_GROWS_DOWN
+    __thread char *stack_limit_pointer = (char *)((uintptr_t)-1);
+#else
+    __thread char *stack_limit_pointer = NULL;
+#endif
 
 #ifdef __cplusplus
 }

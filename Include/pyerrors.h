@@ -93,6 +93,8 @@ PyAPI_DATA(PyObject *) PyExc_RuntimeError;
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03050000
 PyAPI_DATA(PyObject *) PyExc_RecursionError;
 #endif
+PyAPI_DATA(PyObject *) PyExc_RecursionOverflow;
+PyAPI_DATA(PyObject *) PyExc_StackOverflow;
 PyAPI_DATA(PyObject *) PyExc_NotImplementedError;
 PyAPI_DATA(PyObject *) PyExc_SyntaxError;
 PyAPI_DATA(PyObject *) PyExc_IndentationError;

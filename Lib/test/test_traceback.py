@@ -376,7 +376,7 @@ class TracebackFormatTests(unittest.TestCase):
             # It also varies depending on the platform (stack size)
             # Fortunately, we don't care about exactness here, so we use regex
             r'  \[Previous line repeated (\d+) more times\]' '\n'
-            'RecursionError: maximum recursion depth exceeded\n'
+            'RecursionOverflow: maximum recursion depth exceeded\n'
         )
 
         expected = result_f.splitlines()
@@ -1194,7 +1194,7 @@ class TestTracebackException(unittest.TestCase):
             len([l for l in res if 'ZeroDivisionError:' in l]),
             sys.getrecursionlimit() * 0.5)
         self.assertIn(
-            "RecursionError: maximum recursion depth exceeded", res[-1])
+            "RecursionOverflow: maximum recursion depth exceeded", res[-1])
 
     def test_compact_with_cause(self):
         try:

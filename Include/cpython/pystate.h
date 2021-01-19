@@ -55,7 +55,6 @@ struct _ts {
     PyFrameObject *frame;
     int recursion_depth;
     int recursion_headroom; /* Allow 50 more calls to handle any errors. */
-    int stackcheck_counter;
 
     /* 'tracing' keeps track of the execution depth when tracing/profiling.
        This is to prevent the actual trace/profile code from being recorded in
@@ -285,3 +284,5 @@ typedef int (*crossinterpdatafunc)(PyObject *, struct _xid *);
 
 PyAPI_FUNC(int) _PyCrossInterpreterData_RegisterClass(PyTypeObject *, crossinterpdatafunc);
 PyAPI_FUNC(crossinterpdatafunc) _PyCrossInterpreterData_Lookup(PyObject *);
+
+extern __thread char *stack_limit_pointer;
