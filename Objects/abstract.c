@@ -2445,6 +2445,9 @@ static int
 object_recursive_isinstance(PyThreadState *tstate, PyObject *inst, PyObject *cls)
 {
     _Py_IDENTIFIER(__instancecheck__);
+    if (_Py_CheckStackDepthCall(tstate, " in __instancecheck__")) {
+        return -1;
+    }
 
     /* Quick test for an exact match */
     if (Py_IS_TYPE(inst, (PyTypeObject *)cls)) {
@@ -2459,9 +2462,6 @@ object_recursive_isinstance(PyThreadState *tstate, PyObject *inst, PyObject *cls
     if (PyTuple_Check(cls)) {
         /* Not a general sequence -- that opens up the road to
            recursion and stack overflow. */
-        if (_Py_EnterRecursiveCall(tstate, " in __instancecheck__")) {
-            return -1;
-        }
         Py_ssize_t n = PyTuple_GET_SIZE(cls);
         int r = 0;
         for (Py_ssize_t i = 0; i < n; ++i) {
@@ -2472,19 +2472,13 @@ object_recursive_isinstance(PyThreadState *tstate, PyObject *inst, PyObject *cls
                 break;
             }
         }
-        _Py_LeaveRecursiveCall(tstate);
         return r;
     }
 
     PyObject *checker = _PyObject_LookupSpecial(cls, &PyId___instancecheck__);
     if (checker != NULL) {
-        if (_Py_EnterRecursiveCall(tstate, " in __instancecheck__")) {
-            Py_DECREF(checker);
-            return -1;
-        }
 
         PyObject *res = PyObject_CallOneArg(checker, inst);
-        _Py_LeaveRecursiveCall(tstate);
         Py_DECREF(checker);
 
         if (res == NULL) {
@@ -2539,6 +2533,9 @@ object_issubclass(PyThreadState *tstate, PyObject *derived, PyObject *cls)
 {
     _Py_IDENTIFIER(__subclasscheck__);
     PyObject *checker;
+    if (_Py_CheckStackDepthCall(tstate, " in __subclasscheck__")) {
+        return -1;
+    }
 
     /* We know what type's __subclasscheck__ does. */
     if (PyType_CheckExact(cls)) {
@@ -2550,9 +2547,6 @@ object_issubclass(PyThreadState *tstate, PyObject *derived, PyObject *cls)
 
     if (PyTuple_Check(cls)) {
 
-        if (_Py_EnterRecursiveCall(tstate, " in __subclasscheck__")) {
-            return -1;
-        }
         Py_ssize_t n = PyTuple_GET_SIZE(cls);
         int r = 0;
         for (Py_ssize_t i = 0; i < n; ++i) {
@@ -2562,19 +2556,13 @@ object_issubclass(PyThreadState *tstate, PyObject *derived, PyObject *cls)
                 /* either found it, or got an error */
                 break;
         }
-        _Py_LeaveRecursiveCall(tstate);
         return r;
     }
 
     checker = _PyObject_LookupSpecial(cls, &PyId___subclasscheck__);
     if (checker != NULL) {
         int ok = -1;
-        if (_Py_EnterRecursiveCall(tstate, " in __subclasscheck__")) {
-            Py_DECREF(checker);
-            return ok;
-        }
         PyObject *res = PyObject_CallOneArg(checker, derived);
-        _Py_LeaveRecursiveCall(tstate);
         Py_DECREF(checker);
         if (res != NULL) {
             ok = PyObject_IsTrue(res);

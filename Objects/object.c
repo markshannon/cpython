@@ -414,12 +414,11 @@ PyObject_Repr(PyObject *v)
 
     /* It is possible for a type to have a tp_repr representation that loops
        infinitely. */
-    if (_Py_EnterRecursiveCall(tstate,
+    if (_Py_CheckStackDepthCall(tstate,
                                " while getting the repr of an object")) {
         return NULL;
     }
     res = (*Py_TYPE(v)->tp_repr)(v);
-    _Py_LeaveRecursiveCall(tstate);
 
     if (res == NULL) {
         return NULL;
@@ -443,6 +442,10 @@ PyObject *
 PyObject_Str(PyObject *v)
 {
     PyObject *res;
+    if (Py_CheckStackDepth(" while getting the str of an object")) {
+        return NULL;
+    }
+
     if (PyErr_CheckSignals())
         return NULL;
 #ifdef USE_STACKCHECK
@@ -464,27 +467,22 @@ PyObject_Str(PyObject *v)
     if (Py_TYPE(v)->tp_str == NULL)
         return PyObject_Repr(v);
 
-    PyThreadState *tstate = _PyThreadState_GET();
 #ifdef Py_DEBUG
     /* PyObject_Str() must not be called with an exception set,
        because it can clear it (directly or indirectly) and so the
        caller loses its exception */
-    assert(!_PyErr_Occurred(tstate));
+    assert(!PyErr_Occurred());
 #endif
 
     /* It is possible for a type to have a tp_str representation that loops
        infinitely. */
-    if (_Py_EnterRecursiveCall(tstate, " while getting the str of an object")) {
-        return NULL;
-    }
     res = (*Py_TYPE(v)->tp_str)(v);
-    _Py_LeaveRecursiveCall(tstate);
 
     if (res == NULL) {
         return NULL;
     }
     if (!PyUnicode_Check(res)) {
-        _PyErr_Format(tstate, PyExc_TypeError,
+        PyErr_Format(PyExc_TypeError,
                       "__str__ returned non-string (type %.200s)",
                       Py_TYPE(res)->tp_name);
         Py_DECREF(res);

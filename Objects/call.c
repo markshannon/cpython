@@ -334,9 +334,7 @@ function_code_fastcall(PyThreadState *tstate, PyCodeObject *co,
         _PyObject_GC_TRACK(f);
     }
     else {
-        ++tstate->recursion_depth;
         Py_DECREF(f);
-        --tstate->recursion_depth;
     }
     return result;
 }
