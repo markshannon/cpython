@@ -64,7 +64,7 @@ class CommonTest(seq_tests.CommonTest):
         a = self.type2test([])
         for i in range(50_000):
             a = self.type2test([a])
-        self.assertRaises(StackOverflow, repr, a)
+        self.assertRaises(RecursionError, repr, a)
 
     def test_set_subscript(self):
         a = self.type2test(range(20))

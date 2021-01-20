@@ -5,6 +5,7 @@
 #include "pycore_initconfig.h"
 #include "pycore_pyerrors.h"
 #include "pycore_pystate.h"    // _PyThreadState_GET()
+#include "pycore_ceval.h"      // _Py_MakeStackCheck()
 #include "pycore_sysmodule.h"
 #include "pycore_traceback.h"
 
@@ -103,7 +104,6 @@ _PyErr_SetObject(PyThreadState *tstate, PyObject *exception, PyObject *value)
 {
     PyObject *exc_value;
     PyObject *tb = NULL;
-
     if (exception != NULL &&
         !PyExceptionClass_Check(exception)) {
         _PyErr_Format(tstate, PyExc_SystemError,
@@ -112,10 +112,9 @@ _PyErr_SetObject(PyThreadState *tstate, PyObject *exception, PyObject *value)
                       exception);
         return;
     }
-
     Py_XINCREF(value);
     exc_value = _PyErr_GetTopmostException(tstate)->exc_value;
-    if (exc_value != NULL && exc_value != Py_None) {
+    if (exc_value != NULL && exc_value != Py_None && !_Py_MakeStackCheck(tstate)) {
         /* Implicit exception chaining */
         Py_INCREF(exc_value);
         if (value == NULL || !PyExceptionInstance_Check(value)) {
@@ -290,14 +289,19 @@ _PyErr_NormalizeException(PyThreadState *tstate, PyObject **exc,
                           PyObject **val, PyObject **tb)
 {
     int recursion_depth = 0;
+    if (tstate->recursion_headroom == 0) {
+         stack_limit_pointer += STACK_EXTRA;
+    }
     tstate->recursion_headroom++;
     PyObject *type, *value, *initial_tb;
-
   restart:
     type = *exc;
     if (type == NULL) {
         /* There was no exception, so nothing to do. */
         tstate->recursion_headroom--;
+        if (tstate->recursion_headroom == 0) {
+            stack_limit_pointer -= STACK_EXTRA;
+        }
         return;
     }
 
@@ -350,6 +354,9 @@ _PyErr_NormalizeException(PyThreadState *tstate, PyObject **exc,
     *exc = type;
     *val = value;
     tstate->recursion_headroom--;
+    if (tstate->recursion_headroom == 0) {
+        stack_limit_pointer -= STACK_EXTRA;
+    }
     return;
 
   error:

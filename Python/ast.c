@@ -170,6 +170,9 @@ validate_constant(PyObject *value)
 static int
 validate_expr(expr_ty exp, expr_context_ty ctx)
 {
+    if(Py_CheckStackDepth(" while validating an expression")) {
+        return 0;
+    }
     int check_ctx = 1;
     expr_context_ty actual_ctx;
 

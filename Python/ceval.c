@@ -844,6 +844,40 @@ Py_SetRecursionLimit(int new_limit)
     tstate->interp->ceval.recursion_limit = new_limit;
 }
 
+/* The function _Py_EnterRecursiveCall() only calls _Py_CheckRecursiveCall()
+   if the recursion_depth reaches recursion_limit. */
+int
+_Py_CheckRecursiveCall(PyThreadState *tstate, const char *where)
+{
+    int recursion_limit = tstate->interp->ceval.recursion_limit;
+    if (tstate->recursion_headroom) {
+        if (tstate->recursion_depth > recursion_limit + 50) {
+            /* Overflowing while handling an overflow. Give up. */
+            Py_FatalError("Cannot recover from stack overflow.");
+        }
+    }
+    else {
+        if (tstate->recursion_depth > recursion_limit) {
+            tstate->recursion_headroom++;
+            _PyErr_Format(tstate, PyExc_RecursionOverflow,
+                        "maximum recursion depth exceeded%s",
+                        where);
+            tstate->recursion_headroom--;
+            --tstate->recursion_depth;
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int
+_Py_StackCheckFail(PyThreadState *tstate, const char *where)
+{
+    _PyErr_Format(tstate, PyExc_StackOverflow,
+                        "C stack overflow%s",
+                        where);
+    return -1;
+}
 
 // PEP 634: Structural Pattern Matching
 
@@ -1578,7 +1612,8 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, PyFrameObject *f, int throwflag)
 
 /* Start of code */
 
-    if (_Py_EnterRecursivePythonCall(tstate, "")) {
+    /* push frame */
+    if (_Py_EnterRecursiveCall(tstate, "")) {
         return NULL;
     }
 
@@ -4543,7 +4578,7 @@ exiting:
 exit_eval_frame:
     if (PyDTrace_FUNCTION_RETURN_ENABLED())
         dtrace_function_return(f);
-    --tstate->recursion_depth;
+    _Py_LeaveRecursiveCall(tstate);
     tstate->frame = f->f_back;
 
     return _Py_CheckFunctionResult(tstate, NULL, retval, __func__);
@@ -6488,4 +6523,11 @@ int Py_EnterRecursiveCall(const char *where)
 void Py_LeaveRecursiveCall(void)
 {
     _Py_LeaveRecursiveCall_inline();
+}
+
+#undef Py_CheckStackDepth
+
+int  Py_CheckStackDepth(const char *where)
+{
+    return _Py_CheckStackDepth_inline(where);
 }

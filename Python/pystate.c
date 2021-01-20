@@ -628,8 +628,6 @@ new_threadstate(PyInterpreterState *interp, int init)
     tstate->async_exc = NULL;
     tstate->thread_id = PyThread_get_thread_ident();
 
-    tstate->dict = NULL;
-
 #ifdef STACK_GROWS_DOWN
     if (stack_limit_pointer == (char *)((uintptr_t)-1)) {
         char var;
@@ -641,6 +639,9 @@ new_threadstate(PyInterpreterState *interp, int init)
         stack_limit_pointer = &var + STACK_ALLOWANCE;
     }
 #endif
+
+    tstate->dict = NULL;
+
     tstate->curexc_type = NULL;
     tstate->curexc_value = NULL;
     tstate->curexc_traceback = NULL;

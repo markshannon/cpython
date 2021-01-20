@@ -63,14 +63,10 @@ extern void _PyEval_FiniGIL(PyInterpreterState *interp);
 extern void _PyEval_ReleaseLock(PyThreadState *tstate);
 
 
-static inline int _Py_MakePyRecCheck(PyThreadState *tstate) {
-    return (++tstate->recursion_depth > tstate->interp->ceval.recursion_limit);
-}
-
 /* --- _Py_EnterRecursiveCall() ----------------------------------------- */
 
 
-static inline int _Py_MakeRecCheck(PyThreadState *tstate) {
+static inline int _Py_MakeStackCheck(PyThreadState *tstate) {
     char var;
 #if STACK_GROWS_DOWN
     return &var < stack_limit_pointer;
@@ -80,49 +76,31 @@ static inline int _Py_MakeRecCheck(PyThreadState *tstate) {
 }
 
 
-
-static inline int _Py_EnterRecursivePythonCall(PyThreadState *tstate,
-                                         const char *where) {
-    if (++tstate->recursion_depth <= tstate->interp->ceval.recursion_limit) {
-        return 0;
-    }
-    if (tstate->recursion_headroom) {
-        if (tstate->recursion_depth > tstate->interp->ceval.recursion_limit + 50) {
-            /* Overflowing while handling an overflow. Give up. */
-            Py_FatalError("Cannot recover from stack overflow.");
-        }
-        return 0;
-    }
-    else {
-        tstate->recursion_headroom++;
-        PyErr_Format(PyExc_RecursionOverflow,
-                    "maximum recursion depth exceeded%s",
-                    where);
-        --tstate->recursion_depth;
-        tstate->recursion_headroom--;
-        return -1;
-    }
+static inline int _Py_MakeRecCheck(PyThreadState *tstate) {
+    return (++tstate->recursion_depth > tstate->interp->ceval.recursion_limit);
 }
+
+PyAPI_FUNC(int) _Py_CheckRecursiveCall(
+    PyThreadState *tstate,
+    const char *where);
+
+int _Py_StackCheckFail(
+    PyThreadState *tstate,
+    const char *where);
+
+PyAPI_FUNC(int) Py_CheckStackDepth(const char *where);
 
 static inline int _Py_EnterRecursiveCall(PyThreadState *tstate,
                                          const char *where) {
-    if (_Py_MakeRecCheck(tstate)) {
-#if defined(Py_DEBUG)
-        char var;
-#if STACK_GROWS_DOWN
-        assert(stack_limit_pointer != (char *)((uintptr_t)-1));
-        assert(&var > stack_limit_pointer-1024);
-#else
-        assert(stack_limit_pointer != NULL);
-        assert(&var < stack_limit_pointer+1024);
-#endif
-#endif
-        PyErr_Format(PyExc_StackOverflow,
-                "stack overflow%s",
-                where);
-        return -1;
+    if (_Py_MakeStackCheck(tstate)) {
+        return _Py_StackCheckFail(tstate, where);
     }
-    return 0;
+    return (_Py_MakeRecCheck(tstate) && _Py_CheckRecursiveCall(tstate, where));
+}
+
+static inline int _Py_CheckStackDepthCall(PyThreadState *tstate,
+                                         const char *where) {
+    return _Py_MakeStackCheck(tstate) &&  _Py_StackCheckFail(tstate, where);
 }
 
 static inline int _Py_EnterRecursiveCall_inline(const char *where) {
@@ -130,17 +108,23 @@ static inline int _Py_EnterRecursiveCall_inline(const char *where) {
     return _Py_EnterRecursiveCall(tstate, where);
 }
 
-static inline int Py_StackCheck(const char *where) {
-    return _Py_EnterRecursiveCall_inline(where);
+static inline int _Py_CheckStackDepth_inline(const char *where) {
+    PyThreadState *tstate = PyThreadState_GET();
+    return _Py_MakeStackCheck(tstate) && _Py_StackCheckFail(tstate, where);
 }
 
-#define Py_EnterRecursiveCall(where) Py_StackCheck(where)
+#define Py_EnterRecursiveCall(where) _Py_EnterRecursiveCall_inline(where)
+
+#define Py_CheckStackDepth(where) _Py_CheckStackDepth_inline(where)
+
 
 static inline void _Py_LeaveRecursiveCall(PyThreadState *tstate)  {
-    (void)tstate;
+    tstate->recursion_depth--;
 }
 
 static inline void _Py_LeaveRecursiveCall_inline(void)  {
+    PyThreadState *tstate = PyThreadState_GET();
+    _Py_LeaveRecursiveCall(tstate);
 }
 
 #define Py_LeaveRecursiveCall() _Py_LeaveRecursiveCall_inline()
