@@ -114,7 +114,7 @@ _PyErr_SetObject(PyThreadState *tstate, PyObject *exception, PyObject *value)
     }
     Py_XINCREF(value);
     exc_value = _PyErr_GetTopmostException(tstate)->exc_value;
-    if (exc_value != NULL && exc_value != Py_None && !_Py_MakeStackCheck(tstate)) {
+    if (exc_value != NULL && exc_value != Py_None && !_Py_CheckStackDepthNoException()) {
         /* Implicit exception chaining */
         Py_INCREF(exc_value);
         if (value == NULL || !PyExceptionInstance_Check(value)) {
@@ -278,6 +278,18 @@ PyErr_ExceptionMatches(PyObject *exc)
 #define Py_NORMALIZE_RECURSION_LIMIT 32
 #endif
 
+#ifndef Py_STACK_HEADROOM
+#define Py_STACK_HEADROOM BLOCK_SIZE
+#endif
+
+#undef STACK_EXTRA
+#ifdef C_STACK_GROWS_DOWN
+#define STACK_EXTRA (-Py_STACK_HEADROOM)
+#else
+#define STACK_EXTRA Py_STACK_HEADROOM
+#endif
+
+
 /* Used in many places to normalize a raised exception, including in
    eval_code2(), do_raise(), and PyErr_Print()
 
@@ -290,7 +302,7 @@ _PyErr_NormalizeException(PyThreadState *tstate, PyObject **exc,
 {
     int recursion_depth = 0;
     if (tstate->recursion_headroom == 0) {
-         stack_limit_pointer += STACK_EXTRA;
+         tstate->stack_limit += STACK_EXTRA;
     }
     tstate->recursion_headroom++;
     PyObject *type, *value, *initial_tb;
@@ -300,7 +312,7 @@ _PyErr_NormalizeException(PyThreadState *tstate, PyObject **exc,
         /* There was no exception, so nothing to do. */
         tstate->recursion_headroom--;
         if (tstate->recursion_headroom == 0) {
-            stack_limit_pointer -= STACK_EXTRA;
+            tstate->stack_limit -= STACK_EXTRA;
         }
         return;
     }
@@ -355,7 +367,7 @@ _PyErr_NormalizeException(PyThreadState *tstate, PyObject **exc,
     *val = value;
     tstate->recursion_headroom--;
     if (tstate->recursion_headroom == 0) {
-        stack_limit_pointer -= STACK_EXTRA;
+        tstate->stack_limit -= STACK_EXTRA;
     }
     return;
 

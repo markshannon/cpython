@@ -127,6 +127,7 @@ struct _ts {
 
     /* Unique thread state id. */
     uint64_t id;
+    char *stack_limit;
 
     /* XXX signal handlers should also be here */
 
@@ -284,5 +285,3 @@ typedef int (*crossinterpdatafunc)(PyObject *, struct _xid *);
 
 PyAPI_FUNC(int) _PyCrossInterpreterData_RegisterClass(PyTypeObject *, crossinterpdatafunc);
 PyAPI_FUNC(crossinterpdatafunc) _PyCrossInterpreterData_Lookup(PyObject *);
-
-extern __thread char *stack_limit_pointer;

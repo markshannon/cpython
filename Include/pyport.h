@@ -884,15 +884,10 @@ extern _invalid_parameter_handler _Py_silent_invalid_parameter_handler;
 
 
 /* Stack limits */
-#define STACK_GROWS_DOWN 1
-/* Default stack size is 800k for now
- * Reduce to 240k once py-to-py calls do not consume C stack
+#define C_STACK_GROWS_DOWN 1
+/* Default stack size is 512k for now
+ * Maybe reduce to 256k once py-to-py calls do not consume C stack
  * To stress test reduce to 64k */
-#define STACK_ALLOWANCE (800*1024)
-#ifdef STACK_GROWS_DOWN
-#define STACK_EXTRA -1024
-#else
-#define STACK_EXTRA 1024
-#endif
+#define Py_STACK_SIZE (512*1024)
 
 #endif /* Py_PYPORT_H */

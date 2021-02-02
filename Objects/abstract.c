@@ -2545,7 +2545,7 @@ static int
 object_recursive_isinstance(PyThreadState *tstate, PyObject *inst, PyObject *cls)
 {
     _Py_IDENTIFIER(__instancecheck__);
-    if (_Py_CheckStackDepthCall(tstate, " in __instancecheck__")) {
+    if (Py_CheckStackDepth(" in __instancecheck__")) {
         return -1;
     }
 
@@ -2633,7 +2633,7 @@ object_issubclass(PyThreadState *tstate, PyObject *derived, PyObject *cls)
 {
     _Py_IDENTIFIER(__subclasscheck__);
     PyObject *checker;
-    if (_Py_CheckStackDepthCall(tstate, " in __subclasscheck__")) {
+    if (Py_CheckStackDepth(" in __subclasscheck__")) {
         return -1;
     }
 

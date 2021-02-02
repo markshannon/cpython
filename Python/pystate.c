@@ -627,19 +627,7 @@ new_threadstate(PyInterpreterState *interp, int init)
     tstate->gilstate_counter = 0;
     tstate->async_exc = NULL;
     tstate->thread_id = PyThread_get_thread_ident();
-
-#ifdef STACK_GROWS_DOWN
-    if (stack_limit_pointer == (char *)((uintptr_t)-1)) {
-        char var;
-        stack_limit_pointer = &var - STACK_ALLOWANCE;
-    }
-#else
-    if (stack_limit_pointer == NULL) {
-        char var;
-        stack_limit_pointer = &var + STACK_ALLOWANCE;
-    }
-#endif
-
+    tstate->stack_limit = NULL;
     tstate->dict = NULL;
 
     tstate->curexc_type = NULL;
@@ -1968,12 +1956,6 @@ _Py_GetConfig(void)
     PyThreadState *tstate = _PyThreadState_GET();
     return _PyInterpreterState_GetConfig(tstate->interp);
 }
-
-#ifdef STACK_GROWS_DOWN
-    __thread char *stack_limit_pointer = (char *)((uintptr_t)-1);
-#else
-    __thread char *stack_limit_pointer = NULL;
-#endif
 
 #ifdef __cplusplus
 }

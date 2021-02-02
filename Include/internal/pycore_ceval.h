@@ -66,15 +66,10 @@ extern void _PyEval_ReleaseLock(PyThreadState *tstate);
 /* --- _Py_EnterRecursiveCall() ----------------------------------------- */
 
 
-static inline int _Py_MakeStackCheck(PyThreadState *tstate) {
-    char var;
-#if STACK_GROWS_DOWN
-    return &var < stack_limit_pointer;
-#else
-    return &var > stack_limit_pointer;
-#endif
-}
+#define BLOCK_SIZE 0x2000
+#define BLOCK_MASK (-BLOCK_SIZE)
 
+extern int _PyDoStackCheck(char *page_base, const char *where);
 
 static inline int _Py_MakeRecCheck(PyThreadState *tstate) {
     return (++tstate->recursion_depth > tstate->interp->ceval.recursion_limit);
@@ -92,15 +87,10 @@ PyAPI_FUNC(int) Py_CheckStackDepth(const char *where);
 
 static inline int _Py_EnterRecursiveCall(PyThreadState *tstate,
                                          const char *where) {
-    if (_Py_MakeStackCheck(tstate)) {
-        return _Py_StackCheckFail(tstate, where);
+    if (Py_CheckStackDepth(where)) {
+        return -1;
     }
     return (_Py_MakeRecCheck(tstate) && _Py_CheckRecursiveCall(tstate, where));
-}
-
-static inline int _Py_CheckStackDepthCall(PyThreadState *tstate,
-                                         const char *where) {
-    return _Py_MakeStackCheck(tstate) &&  _Py_StackCheckFail(tstate, where);
 }
 
 static inline int _Py_EnterRecursiveCall_inline(const char *where) {
@@ -108,9 +98,27 @@ static inline int _Py_EnterRecursiveCall_inline(const char *where) {
     return _Py_EnterRecursiveCall(tstate, where);
 }
 
+int _Py_CheckStackDepthNoException(void);
+
+
+static inline char *
+_Py_Address_BaseNextPage(void) {
+    char var;
+    uintptr_t addr = (uintptr_t)&var;
+#if C_STACK_GROWS_DOWN
+    char *page_base = (char *)((addr-BLOCK_SIZE) & BLOCK_MASK);
+#else
+    char *page_base = (char *)((addr+BLOCK_SIZE*2) & BLOCK_MASK)-1;
+#endif
+    return page_base;
+}
+
 static inline int _Py_CheckStackDepth_inline(const char *where) {
-    PyThreadState *tstate = PyThreadState_GET();
-    return _Py_MakeStackCheck(tstate) && _Py_StackCheckFail(tstate, where);
+    char *page_base = _Py_Address_BaseNextPage();
+    if (*page_base == 0) {
+        return _PyDoStackCheck(page_base, where);
+    }
+    return 0;
 }
 
 #define Py_EnterRecursiveCall(where) _Py_EnterRecursiveCall_inline(where)

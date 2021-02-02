@@ -870,14 +870,88 @@ _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where)
     return 0;
 }
 
-int
-_Py_StackCheckFail(PyThreadState *tstate, const char *where)
+/********************************
+ * How the stack check works.
+ *
+ * We treat the frame as a series of pages.
+ * For a 512k stack, we use 64 8k pages.
+ * Assuming that the stack grows down (just swap top and bottom if it grow up),
+ * then we store a value in the base of the next page to indicate whether it is
+ * the base of the stack. We use 0 to indicate that it is the base of the stack.
+ *
+ * Upon starting to execute a thread we initialize `stack_limit` to an
+ * aligned address approximately STACK_SIZE from the current stack pointer.
+ * We also set the byte at that location to zero.
+ *
+ * When checking for overflow, we can just avoid the overhead of
+ * dereferencing through the thread-state object, by testing the base of the
+ * next page. If non-zero, then we are safe to carry on.
+ * If it is zero, then we *might* have reached the bottom of the stack, or
+ * the value of the byte in question just happens to be zero.
+ * So, if the byte at the base of the next page is zero, we do a slow check
+ * against tstate->stack_limit. If the test passes, we set the byte at the
+ * base of the next page to zero, to make subsequent checks cheaper.
+ *
+ * Note that we can't just set all bytes at the base of pages to zero, and
+ * rely on that, as an earlier recursive call may have written to the stack,
+ * and that data is now exposed as we are higher up the stack.
+ *
+ ********************************/
+
+void
+_Py_Initialize_StackLimit(PyThreadState *ts)
 {
-    _PyErr_Format(tstate, PyExc_StackOverflow,
-                        "C stack overflow%s",
-                        where);
-    return -1;
+    /* BLOCK_SIZE must be a power of 2 */
+    assert((BLOCK_SIZE & (BLOCK_SIZE-1)) == 0);
+    assert(Py_STACK_SIZE % BLOCK_SIZE == 0);
+    char *page_base = _Py_Address_BaseNextPage();
+#if STACK_GROWS_DOWN
+    char *stack_base = page_base - Py_STACK_SIZE + BLOCK_SIZE*2;
+#else
+    char *stack_base = page_base + Py_STACK_SIZE - BLOCK_SIZE*2;
+#endif
+    *stack_base = 0;
+    ts->stack_limit = stack_base;
 }
+
+int
+_PyDoStackCheck(char *page_base, const char *where)
+{
+    PyThreadState *tstate = PyThreadState_GET();
+    if (tstate->stack_limit == NULL) {
+        _Py_Initialize_StackLimit(tstate);
+    }
+    if (page_base == tstate->stack_limit) {
+        _PyErr_Format(tstate, PyExc_StackOverflow,
+                            "C stack overflow%s",
+                            where);
+        return -1;
+    }
+    else {
+        *page_base = 1;
+        return 0;
+    }
+}
+
+
+int _Py_CheckStackDepthNoException(void) {
+    char *page_base = _Py_Address_BaseNextPage();
+    if (*page_base) {
+        return 0;
+    }
+    PyThreadState *tstate = PyThreadState_GET();
+    if (tstate->stack_limit == NULL) {
+        _Py_Initialize_StackLimit(tstate);
+    }
+    if (page_base == tstate->stack_limit) {
+        return -1;
+    }
+    else {
+        *page_base = 1;
+        return 0;
+    }
+}
+
 
 // PEP 634: Structural Pattern Matching
 

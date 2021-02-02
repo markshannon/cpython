@@ -1056,6 +1056,7 @@ thread_bootstate_free(struct bootstate *boot)
     PyMem_Free(boot);
 }
 
+extern void _Py_Initialize_StackLimit(PyThreadState *tstate);
 
 static void
 thread_run(void *boot_raw)
@@ -1066,11 +1067,7 @@ thread_run(void *boot_raw)
 
     tstate = boot->tstate;
     tstate->thread_id = PyThread_get_thread_ident();
-#ifdef STACK_GROWS_DOWN
-    stack_limit_pointer = &var - STACK_ALLOWANCE;
-#else
-    stack_limit_pointer = &var + STACK_ALLOWANCE;
-#endif
+    _Py_Initialize_StackLimit(tstate);
     _PyThreadState_Init(tstate);
     PyEval_AcquireThread(tstate);
     tstate->interp->num_threads++;

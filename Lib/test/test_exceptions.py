@@ -1000,7 +1000,6 @@ class ExceptionTests(unittest.TestCase):
                 return sys.exc_info()
         e, v, tb = g()
         self.assertIsInstance(v, RecursionError, type(v))
-        self.assertIn("maximum recursion depth exceeded", str(v))
 
     @cpython_only
     def test_recursion_normalizing_exception(self):
