@@ -62,9 +62,7 @@ extern void _PyEval_FiniGIL(PyInterpreterState *interp);
 
 extern void _PyEval_ReleaseLock(PyThreadState *tstate);
 
-
-/* --- _Py_EnterRecursiveCall() ----------------------------------------- */
-
+/* --- Py_CheckStackDepth() ----------------------------------------- */
 
 #define BLOCK_SIZE 0x2000
 #define BLOCK_MASK (-BLOCK_SIZE)
@@ -84,22 +82,6 @@ int _Py_StackCheckFail(
     const char *where);
 
 PyAPI_FUNC(int) Py_CheckStackDepth(const char *where);
-
-static inline int _Py_EnterRecursiveCall(PyThreadState *tstate,
-                                         const char *where) {
-    if (Py_CheckStackDepth(where)) {
-        return -1;
-    }
-    return (_Py_MakeRecCheck(tstate) && _Py_CheckRecursiveCall(tstate, where));
-}
-
-static inline int _Py_EnterRecursiveCall_inline(const char *where) {
-    PyThreadState *tstate = PyThreadState_GET();
-    return _Py_EnterRecursiveCall(tstate, where);
-}
-
-int _Py_CheckStackDepthNoException(void);
-
 
 static inline char *
 _Py_Address_BaseNextPage(void) {
@@ -121,9 +103,26 @@ static inline int _Py_CheckStackDepth_inline(const char *where) {
     return 0;
 }
 
-#define Py_EnterRecursiveCall(where) _Py_EnterRecursiveCall_inline(where)
-
 #define Py_CheckStackDepth(where) _Py_CheckStackDepth_inline(where)
+
+/* --- _Py_EnterRecursiveCall() ----------------------------------------- */
+
+static inline int _Py_EnterRecursiveCall(PyThreadState *tstate,
+                                         const char *where) {
+    if (Py_CheckStackDepth(where)) {
+        return -1;
+    }
+    return (_Py_MakeRecCheck(tstate) && _Py_CheckRecursiveCall(tstate, where));
+}
+
+static inline int _Py_EnterRecursiveCall_inline(const char *where) {
+    PyThreadState *tstate = PyThreadState_GET();
+    return _Py_EnterRecursiveCall(tstate, where);
+}
+
+int _Py_CheckStackDepthNoException(void);
+
+#define Py_EnterRecursiveCall(where) _Py_EnterRecursiveCall_inline(where)
 
 
 static inline void _Py_LeaveRecursiveCall(PyThreadState *tstate)  {

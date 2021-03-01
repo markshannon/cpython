@@ -1061,7 +1061,6 @@ extern void _Py_Initialize_StackLimit(PyThreadState *tstate);
 static void
 thread_run(void *boot_raw)
 {
-    char var;
     struct bootstate *boot = (struct bootstate *) boot_raw;
     PyThreadState *tstate;
 

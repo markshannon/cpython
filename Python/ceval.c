@@ -874,29 +874,36 @@ _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where)
  * How the stack check works.
  *
  * We treat the frame as a series of pages.
- * For a 512k stack, we use 64 8k pages.
- * Assuming that the stack grows down (just swap top and bottom if it grow up),
- * then we store a value in the base of the next page to indicate whether it is
- * the base of the stack. We use 0 to indicate that it is the base of the stack.
+ * E.g for a 512k stack, we could use 64x8k pages.
+ * Assuming that the stack grows down (just swap top and bottom if it grows up),
+ * we store a value in the base of the next page to indicate that it is
+ * the base of the stack. We use 0 as the marker as it makes the check a bit faster.
  *
- * Upon starting to execute a thread we initialize `stack_limit` to an
- * aligned address approximately STACK_SIZE from the current stack pointer.
+ * Upon starting a thread we initialize `tstate->stack_limit` to a page
+ * aligned address approximately Py_STACK_SIZE from the current stack pointer.
  * We also set the byte at that location to zero.
  *
- * When checking for overflow, we can just avoid the overhead of
+ * When checking for overflow, we avoid the overhead of
  * dereferencing through the thread-state object, by testing the base of the
  * next page. If non-zero, then we are safe to carry on.
  * If it is zero, then we *might* have reached the bottom of the stack, or
- * the value of the byte in question just happens to be zero.
+ * the value of the byte in question might just happen to be zero.
  * So, if the byte at the base of the next page is zero, we do a slow check
- * against tstate->stack_limit. If the test passes, we set the byte at the
- * base of the next page to zero, to make subsequent checks cheaper.
+ * against tstate->stack_limit. If that test passes, we set the byte at the
+ * base of the next page to zero, to make subsequent checks faster.
+ * If it fails, then we have a stack overflow.
  *
- * Note that we can't just set all bytes at the base of pages to zero, and
- * rely on that, as an earlier recursive call may have written to the stack,
- * and that data is now exposed as we are higher up the stack.
+ * The fast check requires 2 ALU operations, 1 memory read and a branch.
+ *
+ * Note that we can't just set the bytes at the base of all pages to zero, and
+ * rely solely on that, as an earlier recursive call may have overwritten some
+ * of our zeroes.
  *
  ********************************/
+
+#ifndef C_STACK_GROWS_DOWN
+#error C_STACK_GROWS_DOWN must be defined.
+#endif
 
 void
 _Py_Initialize_StackLimit(PyThreadState *ts)
@@ -905,7 +912,7 @@ _Py_Initialize_StackLimit(PyThreadState *ts)
     assert((BLOCK_SIZE & (BLOCK_SIZE-1)) == 0);
     assert(Py_STACK_SIZE % BLOCK_SIZE == 0);
     char *page_base = _Py_Address_BaseNextPage();
-#if STACK_GROWS_DOWN
+#if C_STACK_GROWS_DOWN
     char *stack_base = page_base - Py_STACK_SIZE + BLOCK_SIZE*2;
 #else
     char *stack_base = page_base + Py_STACK_SIZE - BLOCK_SIZE*2;

@@ -884,6 +884,10 @@ extern _invalid_parameter_handler _Py_silent_invalid_parameter_handler;
 
 
 /* Stack limits */
+
+/* If stack grows up then
+ *  #define C_STACK_GROWS_DOWN 0
+ */
 #define C_STACK_GROWS_DOWN 1
 /* Default stack size is 512k for now
  * Maybe reduce to 256k once py-to-py calls do not consume C stack
