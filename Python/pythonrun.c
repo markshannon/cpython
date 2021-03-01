@@ -1411,8 +1411,7 @@ Py_SymtableString(const char *str, const char *filename_str, int start)
     return st;
 }
 
-#if defined(USE_STACKCHECK)
-#if defined(WIN32) && defined(_MSC_VER)
+#if defined(WIN32) && !defined(MS_WIN64) && !defined(_M_ARM) && defined(_MSC_VER) && _MSC_VER >= 1300
 
 /* Stack checking for Microsoft C */
 
@@ -1442,11 +1441,7 @@ PyOS_CheckStack(void)
     return 1;
 }
 
-#endif /* WIN32 && _MSC_VER */
-
-/* Alternate implementations can be added here... */
-
-#endif /* USE_STACKCHECK */
+#endif
 
 /* Deprecated C API functions still provided for binary compatibility */
 

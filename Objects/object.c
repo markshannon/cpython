@@ -245,14 +245,12 @@ int
 PyObject_Print(PyObject *op, FILE *fp, int flags)
 {
     int ret = 0;
-    if (PyErr_CheckSignals())
-        return -1;
-#ifdef USE_STACKCHECK
-    if (PyOS_CheckStack()) {
-        PyErr_SetString(PyExc_MemoryError, "stack overflow");
+    if (Py_CheckStackDepth(" while printing an object")) {
         return -1;
     }
-#endif
+    if (PyErr_CheckSignals()) {
+        return -1;
+    }
     clearerr(fp); /* Clear any previous error condition */
     if (op == NULL) {
         Py_BEGIN_ALLOW_THREADS
@@ -390,14 +388,11 @@ PyObject *
 PyObject_Repr(PyObject *v)
 {
     PyObject *res;
-    if (PyErr_CheckSignals())
-        return NULL;
-#ifdef USE_STACKCHECK
-    if (PyOS_CheckStack()) {
-        PyErr_SetString(PyExc_MemoryError, "stack overflow");
+    if (Py_CheckStackDepth(" while getting the repr of an object")) {
         return NULL;
     }
-#endif
+    if (PyErr_CheckSignals())
+        return NULL;
     if (v == NULL)
         return PyUnicode_FromString("<NULL>");
     if (Py_TYPE(v)->tp_repr == NULL)
@@ -447,12 +442,6 @@ PyObject_Str(PyObject *v)
 
     if (PyErr_CheckSignals())
         return NULL;
-#ifdef USE_STACKCHECK
-    if (PyOS_CheckStack()) {
-        PyErr_SetString(PyExc_MemoryError, "stack overflow");
-        return NULL;
-    }
-#endif
     if (v == NULL)
         return PyUnicode_FromString("<NULL>");
     if (PyUnicode_CheckExact(v)) {

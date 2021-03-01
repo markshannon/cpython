@@ -29,12 +29,7 @@ PyAPI_DATA(char) *(*PyOS_ReadlineFunctionPointer)(FILE *, FILE *, const char *);
 #define PYOS_STACK_MARGIN 2048
 
 #if defined(WIN32) && !defined(MS_WIN64) && !defined(_M_ARM) && defined(_MSC_VER) && _MSC_VER >= 1300
-/* Enable stack checking under Microsoft C */
-#define USE_STACKCHECK
-#endif
-
-#ifdef USE_STACKCHECK
-/* Check that we aren't overflowing our stack */
+/* Legacy API to check that we aren't overflowing our stack on Windows. */
 PyAPI_FUNC(int) PyOS_CheckStack(void);
 #endif
 
