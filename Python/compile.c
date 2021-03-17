@@ -6077,8 +6077,7 @@ compiler_match(struct compiler *c, stmt_ty s)
     // It's a set of names, but we don't create it until it's needed:
     pc.stores = NULL;
     match_case_ty m = asdl_seq_GET(s->v.Match.cases, cases - 1);
-    int has_default = WILDCARD_CHECK(m->pattern) && 1 < cases;
-    for (Py_ssize_t i = 0; i < cases - has_default; i++) {
+    for (Py_ssize_t i = 0; i < cases; i++) {
         m = asdl_seq_GET(s->v.Match.cases, i);
         SET_LOC(c, m->pattern);
         RETURN_IF_FALSE(next = compiler_new_block(c));
@@ -6086,7 +6085,7 @@ compiler_match(struct compiler *c, stmt_ty s)
         // will raise. Irrefutable cases must be either guarded, last, or both:
         pc.allow_irrefutable = m->guard != NULL || i == cases - 1;
         // Only copy the subject if we're *not* on the last case:
-        if (i != cases - has_default - 1) {
+        if (i != cases - 1) {
             ADDOP(c, DUP_TOP);
         }
         int result = compiler_pattern(c, m->pattern, &pc, next);
@@ -6097,26 +6096,12 @@ compiler_match(struct compiler *c, stmt_ty s)
             RETURN_IF_FALSE(compiler_jump_if(c, m->guard, next, 0));
         }
         // Success! Pop the subject off, we're done with it:
-        if (i != cases - has_default - 1) {
+        if (i != cases - 1) {
             ADDOP(c, POP_TOP);
         }
         VISIT_SEQ(c, stmt, m->body);
         ADDOP_JUMP(c, JUMP_FORWARD, end);
         compiler_use_next_block(c, next);
-    }
-    if (has_default) {
-        if (cases == 1) {
-            // No matches. Done with the subject:
-            ADDOP(c, POP_TOP);
-        }
-        // A trailing "case _" is common, and lets us save a bit of redundant
-        // pushing and popping in the loop above:
-        m = asdl_seq_GET(s->v.Match.cases, cases - 1);
-        SET_LOC(c, m->pattern);
-        if (m->guard) {
-            RETURN_IF_FALSE(compiler_jump_if(c, m->guard, end, 0));
-        }
-        VISIT_SEQ(c, stmt, m->body);
     }
     compiler_use_next_block(c, end);
     return 1;
