@@ -83,9 +83,10 @@ def_op('INPLACE_FLOOR_DIVIDE', 28)
 def_op('INPLACE_TRUE_DIVIDE', 29)
 def_op('GET_LEN', 30)
 def_op('MATCH_MAPPING', 31)
-def_op('MATCH_SEQUENCE', 32)
+
 def_op('MATCH_KEYS', 33)
 def_op('COPY_DICT_WITHOUT_KEYS', 34)
+def_op('MATCH_KIND', 35)
 
 def_op('WITH_EXCEPT_START', 49)
 def_op('GET_AITER', 50)
@@ -162,7 +163,7 @@ name_op('LOAD_GLOBAL', 116)     # Index in name list
 def_op('IS_OP', 117)
 def_op('CONTAINS_OP', 118)
 def_op('RERAISE', 119)
-
+def_op('AND_BYTE', 120)
 jabs_op('JUMP_IF_NOT_EXC_MATCH', 121)
 jrel_op('SETUP_FINALLY', 122)   # Distance to target address
 

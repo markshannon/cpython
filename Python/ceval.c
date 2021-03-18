@@ -2150,6 +2150,29 @@ main_loop:
             DISPATCH();
         }
 
+        case TARGET(AND_BYTE): {
+            assert (oparg < 256);
+            PyObject *left = TOP();
+            PyObject *res;
+            if (PyLong_CheckExact(left)) {
+                res = _PyLong_AndBits(left, oparg);
+            }
+            else {
+                PyObject *right = PyLong_FromLong(oparg);
+                if (right == NULL) {
+                    goto error;
+                }
+                res = PyNumber_And(left, right);
+                if (res == NULL) {
+                    goto error;
+                }
+                Py_DECREF(right);
+            }
+            SET_TOP(res);
+            Py_DECREF(left);
+            DISPATCH();
+        }
+
         case TARGET(BINARY_XOR): {
             PyObject *right = POP();
             PyObject *left = TOP();
@@ -3588,6 +3611,18 @@ main_loop:
             DISPATCH();
         }
 
+        case TARGET(MATCH_KIND): {
+            _Py_IDENTIFIER(__match_kind__);
+            PyObject *obj = TOP();
+            PyObject *res = special_lookup(tstate, obj, &PyId___match_kind__);
+            if (res == NULL) {
+                goto error;
+            }
+            Py_INCREF(res);
+            PUSH(res);
+            DISPATCH();
+        }
+
         case TARGET(COMPARE_OP): {
             assert(oparg <= Py_GE);
             PyObject *right = POP();
@@ -3896,50 +3931,6 @@ main_loop:
                 }
             }
             int match = PyObject_IsInstance(subject, interp->map_abc);
-            if (match < 0) {
-                goto error;
-            }
-            PUSH(PyBool_FromLong(match));
-            DISPATCH();
-        }
-
-        case TARGET(MATCH_SEQUENCE): {
-            // PUSH(not isinstance(TOS, (bytearray, bytes, str))
-            //      and isinstance(TOS, _collections_abc.Sequence))
-            PyObject *subject = TOP();
-            // Fast path for lists and tuples:
-            if (PyType_FastSubclass(Py_TYPE(subject),
-                                    Py_TPFLAGS_LIST_SUBCLASS |
-                                    Py_TPFLAGS_TUPLE_SUBCLASS))
-            {
-                Py_INCREF(Py_True);
-                PUSH(Py_True);
-                DISPATCH();
-            }
-            // Bail on some possible Sequences that we intentionally exclude:
-            if (PyType_FastSubclass(Py_TYPE(subject),
-                                    Py_TPFLAGS_BYTES_SUBCLASS |
-                                    Py_TPFLAGS_UNICODE_SUBCLASS) ||
-                PyByteArray_Check(subject))
-            {
-                Py_INCREF(Py_False);
-                PUSH(Py_False);
-                DISPATCH();
-            }
-            // Lazily import _collections_abc.Sequence, and keep it handy on the
-            // PyInterpreterState struct (it gets cleaned up at exit):
-            PyInterpreterState *interp = PyInterpreterState_Get();
-            if (interp->seq_abc == NULL) {
-                PyObject *abc = PyImport_ImportModule("_collections_abc");
-                if (abc == NULL) {
-                    goto error;
-                }
-                interp->seq_abc = PyObject_GetAttrString(abc, "Sequence");
-                if (interp->seq_abc == NULL) {
-                    goto error;
-                }
-            }
-            int match = PyObject_IsInstance(subject, interp->seq_abc);
             if (match < 0) {
                 goto error;
             }

@@ -28,6 +28,7 @@ PyAPI_FUNC(unsigned long) PyLong_AsUnsignedLong(PyObject *);
 PyAPI_FUNC(unsigned long) PyLong_AsUnsignedLongMask(PyObject *);
 #ifndef Py_LIMITED_API
 PyAPI_FUNC(int) _PyLong_AsInt(PyObject *);
+PyObject *_PyLong_AndBits(PyObject *, unsigned char);
 #endif
 PyAPI_FUNC(PyObject *) PyLong_GetInfo(void);
 

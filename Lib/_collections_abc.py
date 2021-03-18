@@ -73,6 +73,9 @@ async_generator = type(_ag)
 del _ag
 
 
+MATCH_SEQUENCE = 1
+MATCH_MAPPING = 2
+
 ### ONE-TRICK PONIES ###
 
 def _check_methods(C, *methods):
@@ -758,6 +761,8 @@ class Mapping(Collection):
 
     __slots__ = ()
 
+    __match_kind__ = MATCH_MAPPING
+
     @abstractmethod
     def __getitem__(self, key):
         raise KeyError
@@ -974,6 +979,8 @@ class Sequence(Reversible, Collection):
     """
 
     __slots__ = ()
+
+    __match_kind__ = MATCH_SEQUENCE
 
     @abstractmethod
     def __getitem__(self, index):

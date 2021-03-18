@@ -627,6 +627,11 @@ pycore_create_interpreter(_PyRuntimeState *runtime,
 }
 
 
+int set_match_kind(PyTypeObject *type, int val) {
+    /* TO DO -- There's probably a better way to do this, and it needs error checking. */
+    return PyDict_SetItemString(type->tp_dict, "__match_kind__", PyLong_FromLong(val));
+}
+
 static PyStatus
 pycore_init_singletons(PyInterpreterState *interp)
 {
@@ -707,6 +712,47 @@ pycore_init_types(PyInterpreterState *interp)
         }
     }
 
+    }
+
+    /* TO DO -- There's probably a better way to do this */
+    if (set_match_kind(&PyBaseObject_Type, MATCH_DEFAULT_FLAG)) {
+        return _PyStatus_ERR("can't set object.__match_kind__");
+    }
+    if (set_match_kind(&PyByteArray_Type, MATCH_SELF_FLAG)) {
+        return _PyStatus_ERR("can't set bytearray.__match_kind__");
+    }
+    if (set_match_kind(&PyBytes_Type, MATCH_SELF_FLAG)) {
+        return _PyStatus_ERR("can't set bytes.__match_kind__");
+    }
+    if (set_match_kind(&PySet_Type, MATCH_SELF_FLAG)) {
+        return _PyStatus_ERR("can't set set.__match_kind__");
+    }
+    if (set_match_kind(&PyFrozenSet_Type, MATCH_SELF_FLAG)) {
+        return _PyStatus_ERR("can't set frozenset.__match_kind__");
+    }
+    if (set_match_kind(&PyTuple_Type, MATCH_SELF_FLAG | MATCH_SEQUENCE_FLAG)) {
+        return _PyStatus_ERR("can't set tuple.__match_kind__");
+    }
+    if (set_match_kind(&PyUnicode_Type, MATCH_SELF_FLAG)) {
+        return _PyStatus_ERR("can't set str.__match_kind__");
+    }
+    if (set_match_kind(&PyLong_Type, MATCH_SELF_FLAG)) {
+        return _PyStatus_ERR("can't set long.__match_kind__");
+    }
+    if (set_match_kind(&PyFloat_Type, MATCH_SELF_FLAG)) {
+        return _PyStatus_ERR("can't set float.__match_kind__");
+    }
+    if (set_match_kind(&PyDict_Type, MATCH_SELF_FLAG | MATCH_MAPPING_FLAG)) {
+        return _PyStatus_ERR("can't set dict.__match_kind__");
+    }
+    if (set_match_kind(&PyList_Type, MATCH_SELF_FLAG | MATCH_SEQUENCE_FLAG)) {
+        return _PyStatus_ERR("can't set list.__match_kind__");
+    }
+    if (set_match_kind(&PyRange_Type, MATCH_SEQUENCE_FLAG)) {
+        return _PyStatus_ERR("can't set list.__match_kind__");
+    }
+    if (set_match_kind(&PyMemoryView_Type, MATCH_SEQUENCE_FLAG)) {
+        return _PyStatus_ERR("can't set list.__match_kind__");
     return _PyStatus_OK();
 }
 

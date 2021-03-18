@@ -1151,10 +1151,12 @@ stack_effect(int opcode, int oparg, int jump)
             return -1;
         case GET_LEN:
         case MATCH_MAPPING:
-        case MATCH_SEQUENCE:
+        case MATCH_KIND:
             return 1;
         case MATCH_KEYS:
             return 2;
+        case AND_BYTE:
+            return 0;
         default:
             return PY_INVALID_STACK_EFFECT;
     }
@@ -5623,6 +5625,7 @@ compiler_pattern_subpattern(struct compiler *c, expr_ty p, pattern_context *pc, 
 {
     int allow_irrefutable = pc->allow_irrefutable;
     pc->allow_irrefutable = 1;
+    ADDOP(c, MATCH_KIND);
     RETURN_IF_FALSE(compiler_pattern(c, p, pc, fail));
     pc->allow_irrefutable = allow_irrefutable;
     return 1;
@@ -5637,7 +5640,9 @@ compiler_pattern_as(struct compiler *c, expr_ty p, pattern_context *pc, basicblo
     RETURN_IF_FALSE(end = compiler_new_block(c));
     RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
     // Need to make a copy for (possibly) storing later:
-    ADDOP(c, DUP_TOP);
+    ADDOP(c, DUP_TOP_TWO);
+    ADDOP(c, POP_TOP);
+    ADDOP(c, ROT_THREE);
     RETURN_IF_FALSE(compiler_pattern(c, p->v.MatchAs.pattern, pc, fail_pop_1));
     NEXT_BLOCK(c);
     RETURN_IF_FALSE(pattern_helper_store_name(c, p->v.MatchAs.name, pc));
@@ -5662,6 +5667,7 @@ compiler_pattern_capture(struct compiler *c, expr_ty p, pattern_context *pc)
         const char *e = "name capture %R makes remaining patterns unreachable";
         return compiler_error(c, e, p->v.Name.id);
     }
+    ADDOP(c, POP_TOP);
     RETURN_IF_FALSE(pattern_helper_store_name(c, p->v.Name.id, pc));
     return 1;
 }
@@ -5670,6 +5676,7 @@ compiler_pattern_capture(struct compiler *c, expr_ty p, pattern_context *pc)
 static int
 compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
 {
+    ADDOP(c, POP_TOP);
     asdl_expr_seq *args = p->v.Call.args;
     asdl_keyword_seq *kwargs = p->v.Call.keywords;
     Py_ssize_t nargs = asdl_seq_LEN(args);
@@ -5730,6 +5737,7 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
 static int
 compiler_pattern_literal(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
 {
+    ADDOP(c, POP_TOP);
     assert(p->kind == Constant_kind);
     PyObject *v = p->v.Constant.value;
     ADDOP_LOAD_CONST(c, v);
@@ -5745,6 +5753,7 @@ compiler_pattern_literal(struct compiler *c, expr_ty p, pattern_context *pc, bas
 static int
 compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
 {
+    ADDOP(c, POP_TOP);
     basicblock *end, *fail_pop_1, *fail_pop_3;
     RETURN_IF_FALSE(end = compiler_new_block(c));
     RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
@@ -5763,6 +5772,7 @@ compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, bas
         ADDOP_JUMP(c, JUMP_FORWARD, end);
         compiler_use_next_block(c, fail_pop_1);
         ADDOP(c, POP_TOP);
+        ADDOP_JUMP(c, JUMP_FORWARD, fail);
         compiler_use_next_block(c, end);
         return 1;
     }
@@ -5834,8 +5844,6 @@ compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, bas
 }
 
 
-/* TO DO --From here ***/
-
 static int
 compiler_pattern_or(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
 {
@@ -5872,11 +5880,14 @@ compiler_pattern_or(struct compiler *c, expr_ty p, pattern_context *pc, basicblo
             }
         }
         else {
-            if (!compiler_addop(c, DUP_TOP) ||
+            if (!compiler_addop(c, DUP_TOP_TWO) ||
                 !compiler_pattern(c, alt, pc, next))
             {
                 goto error;
             }
+            /* Pop kind and subject */
+            ADDOP(c, POP_TOP);
+            ADDOP(c, POP_TOP);
             ADDOP_JUMP(c, JUMP_ABSOLUTE, end);
 
         }
@@ -5943,7 +5954,7 @@ compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, ba
     basicblock *end, *fail_pop_1;
     RETURN_IF_FALSE(end = compiler_new_block(c));
     RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
-    ADDOP(c, MATCH_SEQUENCE);
+    ADDOP_I(c, AND_BYTE, MATCH_SEQUENCE_FLAG);
     ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pop_1);
     NEXT_BLOCK(c);
     if (star < 0) {
@@ -5984,6 +5995,7 @@ compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, ba
 static int
 compiler_pattern_value(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
 {
+    ADDOP(c, POP_TOP);
     assert(p->kind == Attribute_kind);
     assert(p->v.Attribute.ctx == Load);
     VISIT(c, expr, p);
@@ -5997,6 +6009,7 @@ compiler_pattern_value(struct compiler *c, expr_ty p, pattern_context *pc, basic
 static int
 compiler_pattern_wildcard(struct compiler *c, expr_ty p, pattern_context *pc)
 {
+    ADDOP(c, POP_TOP);
     assert(p->kind == Name_kind);
     assert(p->v.Name.ctx == Store);
     assert(WILDCARD_CHECK(p));
@@ -6051,6 +6064,7 @@ static int
 compiler_match(struct compiler *c, stmt_ty s)
 {
     VISIT(c, expr, s->v.Match.subject);
+    ADDOP(c, MATCH_KIND);
     basicblock *next, *end;
     RETURN_IF_FALSE(end = compiler_new_block(c));
     Py_ssize_t cases = asdl_seq_LEN(s->v.Match.cases);
@@ -6071,7 +6085,7 @@ compiler_match(struct compiler *c, stmt_ty s)
         pc.allow_irrefutable = m->guard != NULL || i == cases - 1;
         // Only copy the subject if we're *not* on the last case:
         if (i != cases - 1) {
-            ADDOP(c, DUP_TOP);
+            ADDOP(c, DUP_TOP_TWO);
         }
         int result = compiler_pattern(c, m->pattern, &pc, next);
         Py_CLEAR(pc.stores);
@@ -6863,6 +6877,10 @@ optimize_basic_block(basicblock *bb, PyObject *consts)
                             bb->b_instr[i+1].i_opcode = NOP;
                         }
                         break;
+                    case POP_TOP:
+                        inst->i_opcode = NOP;
+                        bb->b_instr[i+1].i_opcode = NOP;
+                        break;
                 }
                 break;
             }
@@ -7018,6 +7036,16 @@ optimize_basic_block(basicblock *bb, PyObject *consts)
                             bb->b_exit = 1;
                         }
                 }
+                break;
+
+            case DUP_TOP:
+            case MATCH_KIND:
+                if (nextop == POP_TOP) {
+                    inst->i_opcode = NOP;
+                    bb->b_instr[i+1].i_opcode = NOP;
+                }
+                break;
+
         }
     }
     return 0;
