@@ -1942,6 +1942,13 @@ main_loop:
             FAST_DISPATCH();
         }
 
+        case TARGET(DUP_OVER): {
+            PyObject *copy = SECOND();
+            Py_INCREF(copy);
+            PUSH(copy);
+            FAST_DISPATCH();
+        }
+
         case TARGET(UNARY_POSITIVE): {
             PyObject *value = TOP();
             PyObject *res = PyNumber_Positive(value);
