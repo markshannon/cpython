@@ -32,9 +32,9 @@ extern "C" {
 #define INPLACE_TRUE_DIVIDE      29
 #define GET_LEN                  30
 #define MATCH_MAPPING            31
-#define MATCH_SEQUENCE           32
 #define MATCH_KEYS               33
 #define COPY_DICT_WITHOUT_KEYS   34
+#define MATCH_KIND               35
 #define WITH_EXCEPT_START        49
 #define GET_AITER                50
 #define GET_ANEXT                51
@@ -101,6 +101,7 @@ extern "C" {
 #define IS_OP                   117
 #define CONTAINS_OP             118
 #define RERAISE                 119
+#define AND_BYTE                120
 #define JUMP_IF_NOT_EXC_MATCH   121
 #define SETUP_FINALLY           122
 #define LOAD_FAST               124

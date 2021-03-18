@@ -3173,6 +3173,16 @@ PyType_FromModuleAndSpec(PyObject *module, PyType_Spec *spec, PyObject *bases)
                 goto fail;
         }
     }
+    int match_kind = MATCH_DEFAULT_FLAG;
+    if (res->as_sequence.sq_repeat && res->ht_type.tp_iter) {
+        match_kind |= MATCH_SEQUENCE_FLAG;
+    }
+    else if (res->as_sequence.sq_item || res->as_mapping.mp_subscript) {
+        match_kind |= MATCH_MAPPING_FLAG;
+    }
+    if (PyDict_SetItemString(res->ht_type.tp_dict, "__match_kind__", PyLong_FromLong(match_kind))) {
+        goto fail;
+    }
 
     return (PyObject*)res;
 

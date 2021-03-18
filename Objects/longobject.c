@@ -4660,6 +4660,21 @@ long_bitwise(PyLongObject *a,
     return (PyObject *)maybe_small_long(long_normalize(z));
 }
 
+PyObject *
+_PyLong_AndBits(PyObject *o, unsigned char r)
+{
+    assert(PyLong_Check(o));
+    PyLongObject *l = (PyLongObject *)o;
+    unsigned char bits;
+    if (Py_SIZE(l) < 0) {
+        bits = -l->ob_digit[0];
+    }
+    else {
+        bits = l->ob_digit[0];
+    }
+    return get_small_int(bits & r);
+}
+
 static PyObject *
 long_and(PyObject *a, PyObject *b)
 {

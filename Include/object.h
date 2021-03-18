@@ -379,6 +379,13 @@ given type object has a specified feature.
                  Py_TPFLAGS_HAVE_VERSION_TAG | \
                 0)
 
+#define MATCH_SEQUENCE_FLAG 1
+#define MATCH_MAPPING_FLAG 2
+
+#define MATCH_DEFAULT_FLAG 16
+#define MATCH_SELF_FLAG 32
+#define MATCH_POSIITONAL_FLAG 64
+
 /* NOTE: The following flags reuse lower bits (removed as part of the
  * Python 3.0 transition). */
 
