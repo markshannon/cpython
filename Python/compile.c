@@ -913,6 +913,7 @@ stack_effect(int opcode, int oparg, int jump)
         case ROT_FOUR:
             return 0;
         case DUP_TOP:
+        case DUP_OVER:
             return 1;
         case DUP_TOP_TWO:
             return 2;
@@ -5646,10 +5647,7 @@ compiler_pattern_as(struct compiler *c, expr_ty p, pattern_context *pc, basicblo
         ADDOP(c, POP_TOP);
     }
     else {
-        /* ADOOP(c, DUP_OVER); */
-        ADDOP(c, ROT_TWO);
-        ADDOP(c, DUP_TOP);
-        ADDOP(c, ROT_THREE);
+        ADDOP(c, DUP_OVER);
     }
     RETURN_IF_FALSE(pattern_helper_store_name(c, p->v.MatchAs.name, pc));
     ADDOP_JUMP(c, JUMP_FORWARD, end);
@@ -5679,10 +5677,7 @@ compiler_pattern_capture(struct compiler *c, expr_ty p, pattern_context *pc, int
         ADDOP(c, POP_TOP);
     }
     else {
-        /* ADOOP(c, DUP_OVER); */
-        ADDOP(c, ROT_TWO);
-        ADDOP(c, DUP_TOP);
-        ADDOP(c, ROT_THREE);
+        ADDOP(c, DUP_OVER);
     }
     RETURN_IF_FALSE(pattern_helper_store_name(c, p->v.Name.id, pc));
     return 1;
@@ -5696,10 +5691,7 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
         ADDOP(c, POP_TOP);
     }
     else {
-        /* ADOOP(c, DUP_OVER); */
-        ADDOP(c, ROT_TWO);
-        ADDOP(c, DUP_TOP);
-        ADDOP(c, ROT_THREE);
+        ADDOP(c, DUP_OVER);
     }
     asdl_expr_seq *args = p->v.Call.args;
     asdl_keyword_seq *kwargs = p->v.Call.keywords;
@@ -5765,10 +5757,7 @@ compiler_pattern_literal(struct compiler *c, expr_ty p, pattern_context *pc, bas
         ADDOP(c, POP_TOP);
     }
     else {
-        /* ADOOP(c, DUP_OVER); */
-        ADDOP(c, ROT_TWO);
-        ADDOP(c, DUP_TOP);
-        ADDOP(c, ROT_THREE);
+        ADDOP(c, DUP_OVER);
     }
     assert(p->kind == Constant_kind);
     PyObject *v = p->v.Constant.value;
@@ -5994,10 +5983,7 @@ compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, ba
     ADDOP_JUMP(c, POP_JUMP_IF_FALSE, consume ? fail_pop_1 : fail);
     NEXT_BLOCK(c);
     if (!consume) {
-        /* ADOOP(c, DUP_OVER); */
-        ADDOP(c, ROT_TWO);
-        ADDOP(c, DUP_TOP);
-        ADDOP(c, ROT_THREE);
+        ADDOP(c, DUP_OVER);
     }
     if (star < 0) {
         // No star: len(subject) == size
@@ -6041,10 +6027,7 @@ compiler_pattern_value(struct compiler *c, expr_ty p, pattern_context *pc, basic
         ADDOP(c, POP_TOP);
     }
     else {
-        /* ADOOP(c, DUP_OVER); */
-        ADDOP(c, ROT_TWO);
-        ADDOP(c, DUP_TOP);
-        ADDOP(c, ROT_THREE);
+        ADDOP(c, DUP_OVER);
     }
     assert(p->kind == Attribute_kind);
     assert(p->v.Attribute.ctx == Load);

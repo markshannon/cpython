@@ -6,7 +6,7 @@ static void *opcode_targets[256] = {
     &&TARGET_DUP_TOP,
     &&TARGET_DUP_TOP_TWO,
     &&TARGET_ROT_FOUR,
-    &&_unknown_opcode,
+    &&TARGET_DUP_OVER,
     &&_unknown_opcode,
     &&TARGET_NOP,
     &&TARGET_UNARY_POSITIVE,
