@@ -3908,36 +3908,6 @@ main_loop:
             DISPATCH();
         }
 
-        case TARGET(MATCH_MAPPING): {
-            // PUSH(isinstance(TOS, _collections_abc.Mapping))
-            PyObject *subject = TOP();
-            // Fast path for dicts:
-            if (PyDict_Check(subject)) {
-                Py_INCREF(Py_True);
-                PUSH(Py_True);
-                DISPATCH();
-            }
-            // Lazily import _collections_abc.Mapping, and keep it handy on the
-            // PyInterpreterState struct (it gets cleaned up at exit):
-            PyInterpreterState *interp = PyInterpreterState_Get();
-            if (interp->map_abc == NULL) {
-                PyObject *abc = PyImport_ImportModule("_collections_abc");
-                if (abc == NULL) {
-                    goto error;
-                }
-                interp->map_abc = PyObject_GetAttrString(abc, "Mapping");
-                if (interp->map_abc == NULL) {
-                    goto error;
-                }
-            }
-            int match = PyObject_IsInstance(subject, interp->map_abc);
-            if (match < 0) {
-                goto error;
-            }
-            PUSH(PyBool_FromLong(match));
-            DISPATCH();
-        }
-
         case TARGET(MATCH_KEYS): {
             // On successful match for all keys, PUSH(values) and PUSH(True).
             // Otherwise, PUSH(None) and PUSH(False).
