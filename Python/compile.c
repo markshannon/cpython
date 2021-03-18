@@ -1165,7 +1165,6 @@ stack_effect(int opcode, int oparg, int jump)
         case MATCH_CLASS:
             return -1;
         case GET_LEN:
-        case MATCH_MAPPING:
         case MATCH_KIND:
             return 1;
         case MATCH_KEYS:
@@ -5778,7 +5777,7 @@ compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, bas
     Py_ssize_t size = asdl_seq_LEN(values);
     // A starred pattern will be a keyless value. It is guaranteed to be last:
     int star = size ? !asdl_seq_GET(keys, size - 1) : 0;
-    ADDOP(c, MATCH_MAPPING);
+    ADDOP_I(c, AND_BYTE, MATCH_MAPPING_FLAG);
     ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pop_1);
     NEXT_BLOCK(c);
     if (!size) {

@@ -30,7 +30,7 @@ static void *opcode_targets[256] = {
     &&TARGET_INPLACE_FLOOR_DIVIDE,
     &&TARGET_INPLACE_TRUE_DIVIDE,
     &&TARGET_GET_LEN,
-    &&TARGET_MATCH_MAPPING,
+    &&_unknown_opcode,
     &&_unknown_opcode,
     &&TARGET_MATCH_KEYS,
     &&TARGET_COPY_DICT_WITHOUT_KEYS,

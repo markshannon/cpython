@@ -31,7 +31,6 @@ extern "C" {
 #define INPLACE_FLOOR_DIVIDE     28
 #define INPLACE_TRUE_DIVIDE      29
 #define GET_LEN                  30
-#define MATCH_MAPPING            31
 #define MATCH_KEYS               33
 #define COPY_DICT_WITHOUT_KEYS   34
 #define MATCH_KIND               35
