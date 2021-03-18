@@ -253,7 +253,7 @@ static int compiler_async_comprehension_generator(
                                       int depth,
                                       expr_ty elt, expr_ty val, int type);
 
-static int compiler_pattern(struct compiler *, expr_ty, pattern_context *, basicblock *fail);
+static int compiler_pattern(struct compiler *, expr_ty, pattern_context *, basicblock *fail, int consume);
 static int compiler_match(struct compiler *, stmt_ty);
 static int compiler_pattern_subpattern(struct compiler *, expr_ty,
                                        pattern_context *, basicblock *fail);
@@ -5608,7 +5608,10 @@ pattern_helper_sequence_subscr(struct compiler *c, asdl_expr_seq *values,
             assert(WILDCARD_CHECK(value->v.Starred.value));
             continue;
         }
-        ADDOP(c, DUP_TOP);
+        int last = i == size - 1;
+        if (!last) {
+            ADDOP(c, DUP_TOP);
+        }
         if (i < star) {
             ADDOP_LOAD_CONST_NEW(c, PyLong_FromSsize_t(i));
         }
@@ -5620,10 +5623,9 @@ pattern_helper_sequence_subscr(struct compiler *c, asdl_expr_seq *values,
             ADDOP(c, BINARY_SUBTRACT);
         }
         ADDOP(c, BINARY_SUBSCR);
-        RETURN_IF_FALSE(compiler_pattern_subpattern(c, value, pc, fail_pop_1));
+        RETURN_IF_FALSE(compiler_pattern_subpattern(c, value, pc, last ? fail : fail_pop_1));
         NEXT_BLOCK(c);
     }
-    ADDOP(c, POP_TOP);
     ADDOP_JUMP(c, JUMP_FORWARD, end);
     compiler_use_next_block(c, fail_pop_1);
     ADDOP(c, POP_TOP);
@@ -5632,38 +5634,45 @@ pattern_helper_sequence_subscr(struct compiler *c, asdl_expr_seq *values,
     return 1;
 }
 
-
-// Like compiler_pattern, but turn off checks for irrefutability.
+/* Compile a sub-pattern. Computes MATCH_KIND,
+ * turn off checks for irrefutability and always consumes the subject */
 static int
 compiler_pattern_subpattern(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
 {
     int allow_irrefutable = pc->allow_irrefutable;
     pc->allow_irrefutable = 1;
     ADDOP(c, MATCH_KIND);
-    RETURN_IF_FALSE(compiler_pattern(c, p, pc, fail));
+    RETURN_IF_FALSE(compiler_pattern(c, p, pc, fail, 1));
     pc->allow_irrefutable = allow_irrefutable;
     return 1;
 }
 
 
 static int
-compiler_pattern_as(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
+compiler_pattern_as(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
     assert(p->kind == MatchAs_kind);
-    basicblock *end, *fail_pop_1;
+    basicblock *end, *fail_pop_2;
     RETURN_IF_FALSE(end = compiler_new_block(c));
-    RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
-    // Need to make a copy for (possibly) storing later:
-    ADDOP(c, DUP_TOP_TWO);
-    ADDOP(c, POP_TOP);
-    ADDOP(c, ROT_THREE);
-    RETURN_IF_FALSE(compiler_pattern(c, p->v.MatchAs.pattern, pc, fail_pop_1));
+    RETURN_IF_FALSE(fail_pop_2 = compiler_new_block(c));
+    RETURN_IF_FALSE(compiler_pattern(c, p->v.MatchAs.pattern, pc, fail_pop_2, 0));
     NEXT_BLOCK(c);
+    if (consume) {
+        ADDOP(c, POP_TOP);
+    }
+    else {
+        /* ADOOP(c, DUP_OVER); */
+        ADDOP(c, ROT_TWO);
+        ADDOP(c, DUP_TOP);
+        ADDOP(c, ROT_THREE);
+    }
     RETURN_IF_FALSE(pattern_helper_store_name(c, p->v.MatchAs.name, pc));
     ADDOP_JUMP(c, JUMP_FORWARD, end);
-    compiler_use_next_block(c, fail_pop_1);
-    // Need to pop that unused copy from before:
-    ADDOP(c, POP_TOP);
+    compiler_use_next_block(c, fail_pop_2);
+    if (consume) {
+        ADDOP(c, POP_TOP);
+        ADDOP(c, POP_TOP);
+    }
     ADDOP_JUMP(c, JUMP_ABSOLUTE, fail);
     compiler_use_next_block(c, end);
     return 1;
@@ -5671,7 +5680,7 @@ compiler_pattern_as(struct compiler *c, expr_ty p, pattern_context *pc, basicblo
 
 
 static int
-compiler_pattern_capture(struct compiler *c, expr_ty p, pattern_context *pc)
+compiler_pattern_capture(struct compiler *c, expr_ty p, pattern_context *pc, int consume)
 {
     assert(p->kind == Name_kind);
     assert(p->v.Name.ctx == Store);
@@ -5681,16 +5690,32 @@ compiler_pattern_capture(struct compiler *c, expr_ty p, pattern_context *pc)
         const char *e = "name capture %R makes remaining patterns unreachable";
         return compiler_error(c, e, p->v.Name.id);
     }
-    ADDOP(c, POP_TOP);
+    if (consume) {
+        ADDOP(c, POP_TOP);
+    }
+    else {
+        /* ADOOP(c, DUP_OVER); */
+        ADDOP(c, ROT_TWO);
+        ADDOP(c, DUP_TOP);
+        ADDOP(c, ROT_THREE);
+    }
     RETURN_IF_FALSE(pattern_helper_store_name(c, p->v.Name.id, pc));
     return 1;
 }
 
 
 static int
-compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
+compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
-    ADDOP(c, POP_TOP);
+    if (consume) {
+        ADDOP(c, POP_TOP);
+    }
+    else {
+        /* ADOOP(c, DUP_OVER); */
+        ADDOP(c, ROT_TWO);
+        ADDOP(c, DUP_TOP);
+        ADDOP(c, ROT_THREE);
+    }
     asdl_expr_seq *args = p->v.Call.args;
     asdl_keyword_seq *kwargs = p->v.Call.keywords;
     Py_ssize_t nargs = asdl_seq_LEN(args);
@@ -5749,9 +5774,17 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
 
 
 static int
-compiler_pattern_literal(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
+compiler_pattern_literal(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
-    ADDOP(c, POP_TOP);
+    if (consume) {
+        ADDOP(c, POP_TOP);
+    }
+    else {
+        /* ADOOP(c, DUP_OVER); */
+        ADDOP(c, ROT_TWO);
+        ADDOP(c, DUP_TOP);
+        ADDOP(c, ROT_THREE);
+    }
     assert(p->kind == Constant_kind);
     PyObject *v = p->v.Constant.value;
     ADDOP_LOAD_CONST(c, v);
@@ -5765,9 +5798,11 @@ compiler_pattern_literal(struct compiler *c, expr_ty p, pattern_context *pc, bas
 
 
 static int
-compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
+compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
-    ADDOP(c, POP_TOP);
+    if (!consume) {
+        ADDOP(c, DUP_TOP_TWO);
+    }
     basicblock *end, *fail_pop_1, *fail_pop_3;
     RETURN_IF_FALSE(end = compiler_new_block(c));
     RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
@@ -5859,7 +5894,7 @@ compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, bas
 
 
 static int
-compiler_pattern_or(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
+compiler_pattern_or(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
     assert(p->kind == MatchOr_kind);
     // control is the set of names bound by the first alternative. If all of the
@@ -5888,22 +5923,21 @@ compiler_pattern_or(struct compiler *c, expr_ty p, pattern_context *pc, basicblo
             goto error;
         }
         if (is_last) {
-            if (!compiler_pattern(c, alt, pc, fail))
+            if (!compiler_pattern(c, alt, pc, fail, consume))
             {
                 goto error;
             }
         }
         else {
-            if (!compiler_addop(c, DUP_TOP_TWO) ||
-                !compiler_pattern(c, alt, pc, next))
+            if (!compiler_pattern(c, alt, pc, next, 0))
             {
                 goto error;
             }
-            /* Pop kind and subject */
-            ADDOP(c, POP_TOP);
-            ADDOP(c, POP_TOP);
+            if (consume) {
+                ADDOP(c, POP_TOP);
+                ADDOP(c, POP_TOP);
+            }
             ADDOP_JUMP(c, JUMP_ABSOLUTE, end);
-
         }
         compiler_use_next_block(c, next);
         if (!i) {
@@ -5942,7 +5976,7 @@ error:
 
 
 static int
-compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
+compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
     assert(p->kind == List_kind || p->kind == Tuple_kind);
     asdl_expr_seq *values = (p->kind == Tuple_kind) ? p->v.Tuple.elts
@@ -5968,9 +6002,18 @@ compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, ba
     basicblock *end, *fail_pop_1;
     RETURN_IF_FALSE(end = compiler_new_block(c));
     RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
+    if (!consume) {
+        ADDOP(c, DUP_TOP);
+    }
     ADDOP_I(c, AND_BYTE, MATCH_SEQUENCE_FLAG);
-    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pop_1);
+    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, consume ? fail_pop_1 : fail);
     NEXT_BLOCK(c);
+    if (!consume) {
+        /* ADOOP(c, DUP_OVER); */
+        ADDOP(c, ROT_TWO);
+        ADDOP(c, DUP_TOP);
+        ADDOP(c, ROT_THREE);
+    }
     if (star < 0) {
         // No star: len(subject) == size
         ADDOP(c, GET_LEN);
@@ -6007,9 +6050,17 @@ compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, ba
 
 
 static int
-compiler_pattern_value(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
+compiler_pattern_value(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
-    ADDOP(c, POP_TOP);
+    if (consume) {
+        ADDOP(c, POP_TOP);
+    }
+    else {
+        /* ADOOP(c, DUP_OVER); */
+        ADDOP(c, ROT_TWO);
+        ADDOP(c, DUP_TOP);
+        ADDOP(c, ROT_THREE);
+    }
     assert(p->kind == Attribute_kind);
     assert(p->v.Attribute.ctx == Load);
     VISIT(c, expr, p);
@@ -6021,9 +6072,8 @@ compiler_pattern_value(struct compiler *c, expr_ty p, pattern_context *pc, basic
 
 
 static int
-compiler_pattern_wildcard(struct compiler *c, expr_ty p, pattern_context *pc)
+compiler_pattern_wildcard(struct compiler *c, expr_ty p, pattern_context *pc, int consume)
 {
-    ADDOP(c, POP_TOP);
     assert(p->kind == Name_kind);
     assert(p->v.Name.ctx == Store);
     assert(WILDCARD_CHECK(p));
@@ -6032,42 +6082,45 @@ compiler_pattern_wildcard(struct compiler *c, expr_ty p, pattern_context *pc)
         const char *e = "wildcard makes remaining patterns unreachable";
         return compiler_error(c, e);
     }
-    ADDOP(c, POP_TOP);
+    if (consume) {
+        ADDOP(c, POP_TOP);
+        ADDOP(c, POP_TOP);
+    }
     return 1;
 }
 
 
 static int
-compiler_pattern(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail)
+compiler_pattern(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
     SET_LOC(c, p);
     switch (p->kind) {
         case Attribute_kind:
-            return compiler_pattern_value(c, p, pc, fail);
+            return compiler_pattern_value(c, p, pc, fail, consume);
         case BinOp_kind:
             // Because we allow "2+2j", things like "2+2" make it this far:
             return compiler_error(c, "patterns cannot include operators");
         case Call_kind:
-            return compiler_pattern_class(c, p, pc, fail);
+            return compiler_pattern_class(c, p, pc, fail, consume);
         case Constant_kind:
-            return compiler_pattern_literal(c, p, pc, fail);
+            return compiler_pattern_literal(c, p, pc, fail, consume);
         case Dict_kind:
-            return compiler_pattern_mapping(c, p, pc, fail);
+            return compiler_pattern_mapping(c, p, pc, fail, consume);
         case JoinedStr_kind:
             // Because we allow strings, f-strings make it this far:
             return compiler_error(c, "patterns cannot include f-strings");
         case List_kind:
         case Tuple_kind:
-            return compiler_pattern_sequence(c, p, pc, fail);
+            return compiler_pattern_sequence(c, p, pc, fail, consume);
         case MatchAs_kind:
-            return compiler_pattern_as(c, p, pc, fail);
+            return compiler_pattern_as(c, p, pc, fail, consume);
         case MatchOr_kind:
-            return compiler_pattern_or(c, p, pc, fail);
+            return compiler_pattern_or(c, p, pc, fail, consume);
         case Name_kind:
             if (WILDCARD_CHECK(p)) {
-                return compiler_pattern_wildcard(c, p, pc);
+                return compiler_pattern_wildcard(c, p, pc, consume);
             }
-            return compiler_pattern_capture(c, p, pc);
+            return compiler_pattern_capture(c, p, pc, consume);
         default:
             Py_UNREACHABLE();
     }
@@ -6098,10 +6151,7 @@ compiler_match(struct compiler *c, stmt_ty s)
         // will raise. Irrefutable cases must be either guarded, last, or both:
         pc.allow_irrefutable = m->guard != NULL || i == cases - 1;
         // Only copy the subject if we're *not* on the last case:
-        if (i != cases - 1) {
-            ADDOP(c, DUP_TOP_TWO);
-        }
-        int result = compiler_pattern(c, m->pattern, &pc, next);
+        int result = compiler_pattern(c, m->pattern, &pc, next, i == cases - 1);
         Py_CLEAR(pc.stores);
         RETURN_IF_FALSE(result);
         NEXT_BLOCK(c);
