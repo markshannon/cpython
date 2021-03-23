@@ -771,6 +771,7 @@ class PydocDocTest(unittest.TestCase):
         # ...but not the non-methods on object.
         del expected['__doc__']
         del expected['__class__']
+        del expected['__match_kind__']
         # inspect resolves descriptors on type into methods, but vars doesn't,
         # so we need to update __subclasshook__ and __init_subclass__.
         expected['__subclasshook__'] = TestClass.__subclasshook__

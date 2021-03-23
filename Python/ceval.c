@@ -1113,6 +1113,45 @@ fail:
     return NULL;
 }
 
+static inline int
+string_eq(PyObject *s1, PyObject *s2)
+{
+    if (s1 == s2) {
+        return 1;
+    }
+    return _PyUnicode_EQ(s1, s2);
+}
+
+static PyObject *
+multi_index(PyTupleObject *tuple, PyTupleObject *keys, int n)
+{
+    Py_ssize_t klen = Py_SIZE(keys);
+    Py_ssize_t tlen = Py_SIZE(tuple);
+    PyObject *result = PyTuple_New(klen);
+    for (Py_ssize_t ikeys = 0; ikeys < klen; ikeys++) {
+        PyObject *key = PyTuple_GET_ITEM(keys, ikeys);
+        for (Py_ssize_t ituple = n; ituple < tlen; ituple++) {
+            PyObject *item = PyTuple_GET_ITEM(tuple, ituple);
+            if (string_eq(key, item)) {
+                PyObject *i = PyLong_FromSize_t(ituple);
+                if (i == NULL) {
+                    goto error;
+                }
+                PyTuple_SET_ITEM(result, ikeys, i);
+                goto next;
+            }
+        }
+        Py_DECREF(result);
+        Py_RETURN_NONE;
+    next:
+        (void)0;
+    }
+    return result;
+error:
+    Py_DECREF(result);
+    return NULL;
+}
+
 
 static int do_raise(PyThreadState *tstate, PyObject *exc, PyObject *cause);
 static int unpack_iterable(PyThreadState *, PyObject *, int, int, PyObject **);
@@ -1936,8 +1975,8 @@ main_loop:
             DISPATCH();
         }
 
-        case TARGET(DUP_OVER): {
-            PyObject *copy = SECOND();
+        case TARGET(COPY): {
+            PyObject *copy = PEEK(oparg);
             Py_INCREF(copy);
             PUSH(copy);
             FAST_DISPATCH();
@@ -2388,6 +2427,21 @@ main_loop:
             SET_TOP(res);
             if (res == NULL)
                 goto error;
+            DISPATCH();
+        }
+
+        case TARGET(ISINSTANCE): {
+            PyObject *type = POP();
+            PyObject *subject = TOP();
+            int x = PyObject_IsInstance(subject, type);
+            Py_DECREF(type);
+            if (x < 0) {
+                goto error;
+            }
+            PyObject *res = x ? Py_True : Py_False;
+            Py_INCREF(res);
+            SET_TOP(res);
+            Py_DECREF(subject);
             DISPATCH();
         }
 
@@ -3618,15 +3672,110 @@ main_loop:
             DISPATCH();
         }
 
+        case TARGET(GET_ATTR): {
+            PyObject *name = POP();
+            PyObject *owner = TOP();
+            PyObject *res = PyObject_GetAttr(owner, name);
+            if (res == NULL) {
+                goto error;
+            }
+            SET_TOP(res);
+            DISPATCH();
+        }
+
         case TARGET(MATCH_KIND): {
             _Py_IDENTIFIER(__match_kind__);
-            PyObject *obj = TOP();
-            PyObject *res = special_lookup(tstate, obj, &PyId___match_kind__);
+            PyObject *tp = TOP();
+            if (!PyType_Check(tp)) {
+                _PyErr_SetString(tstate, PyExc_TypeError,
+                                        "Pattern class must be a class");
+                goto error;
+            }
+            PyObject *res = _PyType_LookupId((PyTypeObject *)tp, &PyId___match_kind__);
             if (res == NULL) {
                 goto error;
             }
             Py_INCREF(res);
             PUSH(res);
+            DISPATCH();
+        }
+
+        case TARGET(MATCH_ARGS): {
+            _Py_IDENTIFIER(__match_args__);
+            PyObject *cls = TOP();
+            if (!PyType_Check(cls)) {
+                _PyErr_SetString(tstate, PyExc_TypeError,
+                                        "Pattern class must be a class");
+                goto error;
+            }
+            PyObject *res = _PyType_LookupId((PyTypeObject *)cls, &PyId___match_args__);
+            if (res == NULL) {
+                goto error;
+            }
+            if (!PyTuple_CheckExact(res)) {
+                _PyErr_SetString(tstate, PyExc_TypeError,
+                                "__match_args__ must be a tuple of strings");
+                goto error;
+            }
+            for (Py_ssize_t i = 0; i < Py_SIZE(res); i++) {
+                if (!PyUnicode_CheckExact(PyTuple_GET_ITEM(res, i))) {
+                    _PyErr_SetString(tstate, PyExc_TypeError,
+                                "__match_args__ must be a tuple of strings");
+                    goto error;
+                }
+            }
+            Py_INCREF(res);
+            SET_TOP(res);
+            Py_DECREF(cls);
+            DISPATCH();
+        }
+
+        case TARGET(TUPLE_HEAD): {
+            PyObject *tuple = TOP();
+            assert(PyTuple_CheckExact(tuple));
+            PyObject *res = PyTuple_GetSlice(tuple, 0, oparg);
+            SET_TOP(res);
+            Py_DECREF(tuple);
+            DISPATCH();
+        }
+
+        case TARGET(DECONSTRUCT): {
+            _Py_IDENTIFIER(__deconstruct__);
+            PyObject *tp = POP();
+            if (!PyType_Check(tp)) {
+                _PyErr_SetString(tstate, PyExc_TypeError,
+                                        "Pattern class must be a class");
+                goto error;
+            }
+            PyObject *obj = TOP();
+            PyObject *meth = _PyType_LookupId((PyTypeObject *)tp, &PyId___deconstruct__);
+            if (meth == NULL) {
+                if (!PyErr_Occurred()) {
+                    _PyErr_SetString(tstate, PyExc_TypeError, "__deconstruct__ not defined");
+                }
+            }
+            PyObject *res = PyObject_CallOneArg(meth, obj);
+            Py_DECREF(tp);
+            if (res == NULL) {
+                goto error;
+            }
+            PUSH(res);
+            Py_DECREF(obj);
+            DISPATCH();
+        }
+
+        case TARGET(MULTI_INDEX): {
+            PyObject *keys = POP();
+            PyObject *tuple = TOP();
+            assert(PyTuple_Check(keys));
+            assert(PyTuple_Check(tuple));
+            PyObject *res = multi_index((PyTupleObject *)tuple, (PyTupleObject *)keys, oparg);
+            Py_DECREF(keys);
+            if (res == NULL) {
+                goto error;
+            }
+            SET_TOP(res);
+            Py_DECREF(tuple);
             DISPATCH();
         }
 

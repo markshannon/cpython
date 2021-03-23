@@ -13,7 +13,6 @@ extern "C" {
 #define DUP_TOP                   4
 #define DUP_TOP_TWO               5
 #define ROT_FOUR                  6
-#define DUP_OVER                  7
 #define NOP                       9
 #define UNARY_POSITIVE           10
 #define UNARY_NEGATIVE           11
@@ -32,9 +31,14 @@ extern "C" {
 #define INPLACE_FLOOR_DIVIDE     28
 #define INPLACE_TRUE_DIVIDE      29
 #define GET_LEN                  30
+#define GET_ATTR                 31
 #define MATCH_KEYS               33
 #define COPY_DICT_WITHOUT_KEYS   34
 #define MATCH_KIND               35
+#define DECONSTRUCT              43
+#define MULTI_INDEX              41
+#define MATCH_ARGS               42
+#define DECONSTRUCT              43
 #define WITH_EXCEPT_START        49
 #define GET_AITER                50
 #define GET_ANEXT                51
@@ -64,6 +68,7 @@ extern "C" {
 #define INPLACE_AND              77
 #define INPLACE_XOR              78
 #define INPLACE_OR               79
+#define ISINSTANCE               80
 #define LIST_TO_TUPLE            82
 #define RETURN_VALUE             83
 #define IMPORT_STAR              84
@@ -123,6 +128,8 @@ extern "C" {
 #define SET_ADD                 146
 #define MAP_ADD                 147
 #define LOAD_CLASSDEREF         148
+#define COPY                    149
+#define TUPLE_HEAD              150
 #define MATCH_CLASS             152
 #define SETUP_ASYNC_WITH        154
 #define FORMAT_VALUE            155
