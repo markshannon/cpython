@@ -88,10 +88,7 @@ def_op('MATCH_KEYS', 33)
 def_op('COPY_DICT_WITHOUT_KEYS', 34)
 def_op('MATCH_KIND', 35)
 
-def_op('DECONSTRUCT', 40)
-def_op('MULTI_INDEX', 41)
 def_op('MATCH_ARGS', 42)
-def_op('DECONSTRUCT', 43)
 
 def_op('WITH_EXCEPT_START', 49)
 def_op('GET_AITER', 50)
