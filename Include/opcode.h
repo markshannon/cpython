@@ -35,10 +35,7 @@ extern "C" {
 #define MATCH_KEYS               33
 #define COPY_DICT_WITHOUT_KEYS   34
 #define MATCH_KIND               35
-#define DECONSTRUCT              43
-#define MULTI_INDEX              41
 #define MATCH_ARGS               42
-#define DECONSTRUCT              43
 #define WITH_EXCEPT_START        49
 #define GET_AITER                50
 #define GET_ANEXT                51

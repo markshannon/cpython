@@ -1168,10 +1168,7 @@ stack_effect(int opcode, int oparg, int jump)
         case GET_LEN:
         case MATCH_KIND:
         case MATCH_ARGS:
-        case DECONSTRUCT:
             return 1;
-        case MULTI_INDEX:
-            return -1;
         case ISINSTANCE:
         case GET_ATTR:
             return -1;
@@ -5706,8 +5703,6 @@ compiler_pattern_capture(struct compiler *c, expr_ty p, pattern_context *pc, int
     return 1;
 }
 
-
-
 static int
 on_attribute_error_jump_to_fail(
     struct compiler *c, basicblock *on_error, basicblock *fail
@@ -5716,7 +5711,12 @@ on_attribute_error_jump_to_fail(
     RETURN_IF_FALSE(reraise = compiler_new_block(c));
     compiler_use_next_block(c, on_error);
     ADDOP(c, DUP_TOP);
-    ADDOP_LOAD_CONST(c, PyExc_AttributeError);
+    _Py_IDENTIFIER(AttributeError);
+    PyObject *name = _PyUnicode_FromId(&PyId_AttributeError);
+    if (name == NULL) {
+        return 0;
+    }
+    ADDOP_NAME(c, LOAD_GLOBAL, name, names);
     ADDOP_JUMP(c, JUMP_IF_NOT_EXC_MATCH, reraise);
     ADDOP(c, POP_TOP);
     ADDOP(c, POP_TOP);
@@ -5727,146 +5727,6 @@ on_attribute_error_jump_to_fail(
     NEXT_BLOCK(c);
     return 1;
 }
-
-//static int
-//compiler_pattern_class_keywords_default(
-//    struct compiler *c, asdl_keyword_seq *kwargs, pattern_context *pc,
-//    basicblock *fail, basicblock *end
-//) {
-//    basicblock *fail_pop_1, *fail_pop_4, *on_error, *body;
-//    RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
-//    RETURN_IF_FALSE(fail_pop_4 = compiler_new_block(c));
-//    RETURN_IF_FALSE(body = compiler_new_block(c));
-//    RETURN_IF_FALSE(on_error = compiler_new_block(c));
-//    Py_ssize_t nkwargs = asdl_seq_LEN(kwargs);
-//    ADDOP_JUMP(c, SETUP_FINALLY, on_error);
-//    compiler_use_next_block(c, body);
-//    if (!compiler_push_fblock(c, TRY_EXCEPT, body, NULL, NULL)) {
-//        return 0;
-//    }
-//    for (int i = 0; i < nkwargs; i++) {
-//        keyword_ty kw;
-//        kw = (keyword_ty) asdl_seq_GET(kwargs, i);
-//        ADDOP(c, DUP_TOP);
-//        ADDOP_NAME(c, LOAD_ATTR, kw->arg, names);
-//        RETURN_IF_FALSE(compiler_pattern_subpattern(c, kw->value, pc, fail_pop_1));
-//    }
-//    compiler_pop_fblock(c, TRY_EXCEPT, body);
-//    ADDOP_NOLINE(c, POP_TOP);
-//    ADDOP_NOLINE(c, POP_BLOCK);
-//    ADDOP_JUMP_NOLINE(c, JUMP_FORWARD, end);
-//    compiler_use_next_block(c, on_error);
-//    ADDOP(c, DUP_TOP);
-//    ADDOP_LOAD_CONST(c, PyExc_AttributeError);
-//    ADDOP_JUMP(c, JUMP_IF_NOT_EXC_MATCH, fail_pop_4);
-//    ADDOP_I(c, RERAISE, 1);
-//    compiler_use_next_block(c, fail_pop_4);
-//    ADDOP(c, POP_TOP);
-//    ADDOP(c, POP_TOP);
-//    ADDOP(c, POP_TOP);
-//    compiler_use_next_block(c, fail_pop_1);
-//    ADDOP(c, POP_TOP);
-//    ADDOP_JUMP(c, JUMP_FORWARD, fail);
-//    compiler_use_next_block(c, end);
-//    return 1;
-//}
-//
-
-static int
-compiler_pattern_class_positional(
-    struct compiler *c, expr_ty cls, asdl_expr_seq *args, asdl_keyword_seq *kwargs, basicblock *fail
-) {
-    basicblock *fail_pop_1, *fail_pop_2, *fail_pop_4;
-    basicblock *on_error, *body, *raise, *end;
-    RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
-    RETURN_IF_FALSE(fail_pop_2 = compiler_new_block(c));
-    RETURN_IF_FALSE(fail_pop_4 = compiler_new_block(c));
-    RETURN_IF_FALSE(body = compiler_new_block(c));
-    RETURN_IF_FALSE(on_error = compiler_new_block(c));
-    RETURN_IF_FALSE(raise = compiler_new_block(c));
-    RETURN_IF_FALSE(end = compiler_new_block(c));
-    Py_ssize_t nargs = asdl_seq_LEN(args);
-    Py_ssize_t nkwargs = asdl_seq_LEN(kwargs);
-    VISIT(c, expr, cls);
-    if (nkwargs) {
-        ADDOP(c, DUP_TOP);
-        ADDOP(c, ROT_THREE);
-    }
-    ADDOP(c, DECONSTRUCT);
-    if (nargs > 0) {
-        ADDOP_I(c, COPY, 2);
-        ADDOP(c, GET_LEN);
-        ADDOP_LOAD_CONST_NEW(c, PyLong_FromLong(nargs));
-        ADDOP_COMPARE(c, Lt);
-        ADDOP_JUMP(c, POP_JUMP_IF_TRUE, nkwargs ? fail_pop_2 : fail_pop_1);
-        NEXT_BLOCK(c);
-    }
-    for (int i = 0; i < nargs; i++) {
-        ADDOP(c, DUP_TOP);
-        ADDOP_LOAD_CONST_NEW(c, PyLong_FromLong(i));
-        ADDOP(c, BINARY_SUBSCR);
-        if (nkwargs) {
-            ADDOP(c, ROT_THREE);
-        }
-        else {
-            ADDOP(c, ROT_TWO);
-        }
-    }
-    if (nkwargs) {
-        ADDOP(c, ROT_TWO);
-        ADDOP(c, MATCH_ARGS);
-        for (int i = 0; i < nkwargs; i++) {
-            keyword_ty kw = (keyword_ty) asdl_seq_GET(kwargs, i);
-            ADDOP_LOAD_CONST(c, kw->arg);
-        }
-        ADDOP_I(c, BUILD_TUPLE, nkwargs);
-        ADDOP_I(c, MULTI_INDEX, nargs);
-        ADDOP(c, DUP_TOP);
-        ADDOP_LOAD_CONST(c, Py_None);
-        ADDOP_I(c, IS_OP, 0)
-        ADDOP_JUMP(c, POP_JUMP_IF_TRUE, raise);
-        NEXT_BLOCK(c);
-        ADDOP_JUMP(c, SETUP_FINALLY, on_error);
-        compiler_use_next_block(c, body);
-        if (!compiler_push_fblock(c, TRY_EXCEPT, body, NULL, NULL)) {
-            return 0;
-        }
-        /* Have multi-index TOS, with list of items in SECOND. */
-        for (int i = 0; i < nkwargs; i++) {
-            ADDOP(c, DUP_TOP_TWO);
-            ADDOP_LOAD_CONST_NEW(c, PyLong_FromLong(i));
-            ADDOP(c, BINARY_SUBSCR);
-            ADDOP(c, BINARY_SUBSCR);
-            ADDOP(c, ROT_THREE);
-        }
-        ADDOP(c, POP_TOP);
-        ADDOP(c, POP_TOP);
-        ADDOP_NOLINE(c, POP_BLOCK);
-        ADDOP_JUMP_NOLINE(c, JUMP_FORWARD, end);
-        compiler_pop_fblock(c, TRY_EXCEPT, body);
-        compiler_use_next_block(c, on_error);
-        ADDOP(c, DUP_TOP);
-        ADDOP_LOAD_CONST(c, PyExc_AttributeError);
-        ADDOP_JUMP(c, JUMP_IF_NOT_EXC_MATCH, fail_pop_4);
-        ADDOP_I(c, RERAISE, 1);
-        compiler_use_next_block(c, raise);
-        ADDOP_LOAD_CONST(c, PyExc_TypeError);
-        ADDOP_LOAD_CONST_NEW(c, PyUnicode_FromString("Mismatch between __match_args__ and pattern."));
-        ADDOP_I(c, CALL_FUNCTION, 1);
-        ADDOP_I(c, RAISE_VARARGS, 1);
-        compiler_use_next_block(c, fail_pop_4);
-        ADDOP(c, POP_TOP);
-        ADDOP(c, POP_TOP);
-        compiler_use_next_block(c, fail_pop_2);
-        ADDOP(c, POP_TOP);
-    }
-    compiler_use_next_block(c, fail_pop_1);
-    ADDOP(c, POP_TOP);
-    ADDOP_JUMP(c, JUMP_FORWARD, fail);
-    compiler_use_next_block(c, end);
-    return 1;
-}
-
 
 static int
 compiler_pattern_class_default(
@@ -5933,51 +5793,18 @@ compiler_pattern_class_default(
     }
     ADDOP_JUMP(c, JUMP_FORWARD, fail);
     compiler_use_next_block(c, raise);
-    ADDOP_LOAD_CONST(c, PyExc_TypeError);
+    _Py_IDENTIFIER(TypeError);
+    PyObject *name = _PyUnicode_FromId(&PyId_TypeError);
+    if (name == NULL) {
+        return 0;
+    }
+    ADDOP_NAME(c, LOAD_GLOBAL, name, names);
     ADDOP_LOAD_CONST_NEW(c, PyUnicode_FromString("Mismatch between __match_args__ and pattern."));
     ADDOP_I(c, CALL_FUNCTION, 1);
     ADDOP_I(c, RAISE_VARARGS, 1);
     compiler_use_next_block(c, end);
     return 1;
 }
-
-//
-//static int
-//compiler_pattern_class_keywords(
-//    struct compiler *c, asdl_keyword_seq *kwargs, pattern_context *pc,
-//    basicblock *fail, basicblock *end, int consume
-//) {
-//    basicblock *not_positional, *fail_pop_1;
-//    RETURN_IF_FALSE(not_positional = compiler_new_block(c));
-//    RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
-//    ADDOP(c, DUP_TOP);
-//    ADDOP_I(c, AND_BYTE, MATCH_POSIITONAL_FLAG);
-//    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, not_positional);
-//    if (consume) {
-//        ADDOP(c, POP_TOP);
-//    }
-//    else {
-//        ADDOP_I(c, COPY, 2);
-//    }
-//    if (compiler_pattern_class_keywords_positonal(c, kwargs, pc, fail, end) == 0) {
-//        return 0;
-//    }
-//    if (!consume) {
-//        ADDOP(c, DUP_TOP);
-//    }
-//    ADDOP_I(c, AND_BYTE, MATCH_DEFAULT_FLAG);
-//    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pop_1);
-//    if (!consume) {
-//        ADDOP_I(c, COPY, 2);
-//    }
-//    if (compiler_pattern_class_keywords_default(c, kwargs, pc, fail, end) == 0) {
-//        return 0;
-//    }
-//    compiler_use_next_block(c, fail_pop_1);
-//    ADDOP(c, POP_TOP);
-//    ADDOP_JUMP(c, JUMP_FORWARD, fail);
-//    return 1;
-//}
 
 static int
 compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
@@ -6049,20 +5876,9 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
     NEXT_BLOCK(c);
     ADDOP(c, DUP_TOP);
     ADDOP_I(c, AND_BYTE, MATCH_DEFAULT_FLAG);
-    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, positional);
+    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, consume ? fail_pops[1] : fail);
     NEXT_BLOCK(c);
     if (compiler_pattern_class_default(c, p->v.Call.func, args, kwargs, fail) == 0) {
-        return 0;
-    }
-    ADDOP_JUMP(c, JUMP_FORWARD, submatch);
-    compiler_use_next_block(c, positional);
-    if (!consume) {
-        ADDOP(c, DUP_TOP_TWO);
-    }
-    ADDOP_I(c, AND_BYTE, MATCH_POSIITONAL_FLAG);
-    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[0]);
-    NEXT_BLOCK(c);
-    if (compiler_pattern_class_positional(c, p->v.Call.func, args, kwargs, fail) == 0) {
         return 0;
     }
     compiler_use_next_block(c, submatch);
