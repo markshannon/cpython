@@ -1829,6 +1829,7 @@ main_loop:
 
         NEXTOPARG();
     dispatch_opcode:
+        //printf("%d\n", STACK_LEVEL());
 #ifdef DYNAMIC_EXECUTION_PROFILE
 #ifdef DXPAIRS
         dxpairs[lastopcode][opcode]++;
@@ -3657,6 +3658,8 @@ main_loop:
             PyObject *obj = TOP();
             PyObject *res = _PyType_LookupId(Py_TYPE(obj), &PyId___match_kind__);
             if (res == NULL) {
+                _PyErr_SetString(tstate, PyExc_SystemError,
+                                 "class has no __match_kind__");
                 goto error;
             }
             Py_INCREF(res);
@@ -3674,19 +3677,9 @@ main_loop:
             }
             PyObject *res = _PyType_LookupId((PyTypeObject *)cls, &PyId___match_args__);
             if (res == NULL) {
+                _PyErr_SetString(tstate, PyExc_SystemError,
+                                 "class has no __match_args__");
                 goto error;
-            }
-            if (!PyTuple_CheckExact(res)) {
-                _PyErr_SetString(tstate, PyExc_TypeError,
-                                "__match_args__ must be a tuple of strings");
-                goto error;
-            }
-            for (Py_ssize_t i = 0; i < Py_SIZE(res); i++) {
-                if (!PyUnicode_CheckExact(PyTuple_GET_ITEM(res, i))) {
-                    _PyErr_SetString(tstate, PyExc_TypeError,
-                                "__match_args__ must be a tuple of strings");
-                    goto error;
-                }
             }
             Py_INCREF(res);
             SET_TOP(res);
@@ -3696,7 +3689,11 @@ main_loop:
 
         case TARGET(TUPLE_HEAD): {
             PyObject *tuple = TOP();
-            assert(PyTuple_CheckExact(tuple));
+            if (!PyTuple_CheckExact(tuple)) {
+                _PyErr_SetString(tstate, PyExc_TypeError,
+                                "__match_args__ must be a tuple of strings");
+                goto error;
+            }
             PyObject *res = PyTuple_GetSlice(tuple, 0, oparg);
             SET_TOP(res);
             Py_DECREF(tuple);

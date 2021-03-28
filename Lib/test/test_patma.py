@@ -17,7 +17,7 @@ def no_perf(f):
 class MyClass:
     x: int
     y: str
-    __match_args__ = ["x", "y"]
+    __match_args__ = ("x", "y")
 
 
 @dataclasses.dataclass
@@ -2490,10 +2490,14 @@ class TestPatma(unittest.TestCase):
             __match_args__ = "XYZ"
         x = Class()
         y = z = None
-        with self.assertRaises(TypeError):
+        # With illegal __match_args__ any behavior is allowed
+        # However, we shouldn't match in this case.
+        try:
             match x:
                 case Class(y):
                     z = 0
+        except:
+            pass
         self.assertIs(y, None)
         self.assertIs(z, None)
 

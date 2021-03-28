@@ -714,7 +714,10 @@ pycore_init_types(PyInterpreterState *interp)
 
     }
 
-    /* TO DO -- There's probably a better way to do this */
+    /* TO DO -- There's probably a better way to do this, and it needs error checking. */
+    if (PyDict_SetItemString(PyBaseObject_Type.tp_dict, "__match_args__", PyTuple_New(0))) {
+        return _PyStatus_ERR("can't set object.__match_args__");
+    }
     if (set_match_kind(&PyBaseObject_Type, MATCH_DEFAULT_FLAG)) {
         return _PyStatus_ERR("can't set object.__match_kind__");
     }
@@ -742,17 +745,17 @@ pycore_init_types(PyInterpreterState *interp)
     if (set_match_kind(&PyFloat_Type, MATCH_SELF_FLAG)) {
         return _PyStatus_ERR("can't set float.__match_kind__");
     }
-    if (set_match_kind(&PyDict_Type, MATCH_SELF_FLAG | MATCH_MAPPING_FLAG)) {
+    if (set_match_kind(&PyDict_Type, MATCH_MAPPING_FLAG | MATCH_SELF_FLAG)) {
         return _PyStatus_ERR("can't set dict.__match_kind__");
     }
-    if (set_match_kind(&PyList_Type, MATCH_SELF_FLAG | MATCH_SEQUENCE_FLAG)) {
+    if (set_match_kind(&PyList_Type, MATCH_SEQUENCE_FLAG | MATCH_SELF_FLAG)) {
         return _PyStatus_ERR("can't set list.__match_kind__");
     }
-    if (set_match_kind(&PyRange_Type, MATCH_SEQUENCE_FLAG)) {
-        return _PyStatus_ERR("can't set list.__match_kind__");
+    if (set_match_kind(&PyRange_Type, MATCH_SEQUENCE_FLAG | MATCH_DEFAULT_FLAG)) {
+        return _PyStatus_ERR("can't set range.__match_kind__");
     }
-    if (set_match_kind(&PyMemoryView_Type, MATCH_SEQUENCE_FLAG)) {
-        return _PyStatus_ERR("can't set list.__match_kind__");
+    if (set_match_kind(&PyMemoryView_Type, MATCH_SEQUENCE_FLAG | MATCH_DEFAULT_FLAG)) {
+        return _PyStatus_ERR("can't set memoryview.__match_kind__");
     return _PyStatus_OK();
 }
 

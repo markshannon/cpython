@@ -1152,8 +1152,9 @@ stack_effect(int opcode, int oparg, int jump)
             return -1;
         case GET_LEN:
         case MATCH_KIND:
-        case MATCH_ARGS:
             return 1;
+        case MATCH_ARGS:
+            return 0;
         case ISINSTANCE:
         case GET_ATTR:
             return -1;
@@ -5599,10 +5600,7 @@ pattern_helper_sequence_subscr(struct compiler *c, asdl_expr_seq *values,
             assert(WILDCARD_CHECK(value->v.Starred.value));
             continue;
         }
-        int last = i == size - 1;
-        if (!last) {
-            ADDOP(c, DUP_TOP);
-        }
+        ADDOP(c, DUP_TOP);
         if (i < star) {
             ADDOP_LOAD_CONST_NEW(c, PyLong_FromSsize_t(i));
         }
@@ -5614,9 +5612,10 @@ pattern_helper_sequence_subscr(struct compiler *c, asdl_expr_seq *values,
             ADDOP(c, BINARY_SUBTRACT);
         }
         ADDOP(c, BINARY_SUBSCR);
-        RETURN_IF_FALSE(compiler_pattern_subpattern(c, value, pc, last ? fail : fail_pop_1));
+        RETURN_IF_FALSE(compiler_pattern_subpattern(c, value, pc, fail_pop_1));
         NEXT_BLOCK(c);
     }
+    ADDOP(c, POP_TOP);
     ADDOP_JUMP(c, JUMP_FORWARD, end);
     compiler_use_next_block(c, fail_pop_1);
     ADDOP(c, POP_TOP);
@@ -5632,7 +5631,6 @@ compiler_pattern_subpattern(struct compiler *c, expr_ty p, pattern_context *pc, 
 {
     int allow_irrefutable = pc->allow_irrefutable;
     pc->allow_irrefutable = 1;
-    ADDOP(c, MATCH_KIND);
     RETURN_IF_FALSE(compiler_pattern(c, p, pc, fail, 1));
     pc->allow_irrefutable = allow_irrefutable;
     return 1;
@@ -5643,22 +5641,18 @@ static int
 compiler_pattern_as(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
     assert(p->kind == MatchAs_kind);
-    basicblock *end, *fail_pop_2;
+    basicblock *end, *fail_pop_1;
     RETURN_IF_FALSE(end = compiler_new_block(c));
-    RETURN_IF_FALSE(fail_pop_2 = compiler_new_block(c));
-    RETURN_IF_FALSE(compiler_pattern(c, p->v.MatchAs.pattern, pc, fail_pop_2, 0));
+    RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
+    RETURN_IF_FALSE(compiler_pattern(c, p->v.MatchAs.pattern, pc, fail_pop_1, 0));
     NEXT_BLOCK(c);
-    if (consume) {
-        ADDOP(c, POP_TOP);
-    }
-    else {
-        ADDOP_I(c, COPY, 2);
+    if (!consume) {
+        ADDOP(c, DUP_TOP);
     }
     RETURN_IF_FALSE(pattern_helper_store_name(c, p->v.MatchAs.name, pc));
     ADDOP_JUMP(c, JUMP_FORWARD, end);
-    compiler_use_next_block(c, fail_pop_2);
+    compiler_use_next_block(c, fail_pop_1);
     if (consume) {
-        ADDOP(c, POP_TOP);
         ADDOP(c, POP_TOP);
     }
     ADDOP_JUMP(c, JUMP_ABSOLUTE, fail);
@@ -5678,11 +5672,8 @@ compiler_pattern_capture(struct compiler *c, expr_ty p, pattern_context *pc, int
         const char *e = "name capture %R makes remaining patterns unreachable";
         return compiler_error(c, e, p->v.Name.id);
     }
-    if (consume) {
-        ADDOP(c, POP_TOP);
-    }
-    else {
-        ADDOP_I(c, COPY, 2);
+    if (!consume) {
+        ADDOP(c, DUP_TOP);
     }
     RETURN_IF_FALSE(pattern_helper_store_name(c, p->v.Name.id, pc));
     return 1;
@@ -5706,6 +5697,7 @@ on_attribute_error_jump_to_fail(
     ADDOP(c, POP_TOP);
     ADDOP(c, POP_TOP);
     ADDOP(c, POP_TOP);
+    ADDOP(c, POP_EXCEPT);
     ADDOP_JUMP(c, JUMP_FORWARD, fail);
     compiler_use_next_block(c, reraise);
     ADDOP_I(c, RERAISE, 1);
@@ -5728,8 +5720,7 @@ compiler_pattern_class_default(
     if (nargs) {
         VISIT(c, expr, cls);
         ADDOP(c, MATCH_ARGS);
-        ADDOP(c, DUP_TOP);
-        /* Stack: subject match_args match_args */
+        /* Stack: subject match_args */
         ADDOP(c, GET_LEN);
         ADDOP_LOAD_CONST_NEW(c, PyLong_FromLong(nargs));
         ADDOP_COMPARE(c, Lt);
@@ -5744,16 +5735,16 @@ compiler_pattern_class_default(
         ADDOP_LOAD_CONST_NEW(c, PyLong_FromLong(i));
         ADDOP(c, BINARY_SUBSCR);
         ADDOP(c, GET_ATTR);
-        /* Stack: subject match_args getattr(subject, match_args[i]) */
         ADDOP(c, ROT_THREE);
+        /* Stack: getattr(subject, match_args[i]) subject match_args */
     }
     if (nargs) {
         if (nkwargs) {
             ADDOP_I(c, TUPLE_HEAD, nargs);
             for (int i = 0; i < nkwargs; i++) {
                 keyword_ty kw = (keyword_ty) asdl_seq_GET(kwargs, i);
-                ADDOP(c, DUP_TOP);
                 ADDOP_LOAD_CONST(c, kw->arg);
+                ADDOP_I(c, COPY, 2);
                 ADDOP_COMPARE(c, In);
                 ADDOP_JUMP(c, POP_JUMP_IF_TRUE, raise);
                 NEXT_BLOCK(c);
@@ -5761,6 +5752,7 @@ compiler_pattern_class_default(
         }
         ADDOP(c, POP_TOP);
     }
+    /* Stack attrs*nargs subject */
     for (int i = 0; i < nkwargs; i++) {
         keyword_ty kw = (keyword_ty) asdl_seq_GET(kwargs, i);
         ADDOP(c, DUP_TOP);
@@ -5768,11 +5760,12 @@ compiler_pattern_class_default(
         ADDOP(c, ROT_TWO);
     }
     ADDOP(c, POP_TOP);
+    /* Stack pos_attrs*nargs kw_attrs*nkwargs */
     ADDOP(c, POP_BLOCK);
     ADDOP_JUMP(c, JUMP_FORWARD, end);
     RETURN_IF_FALSE(on_attribute_error_jump_to_fail(c, on_error, fail_pop));
     compiler_use_next_block(c, fail_pop);
-    ADDOP(c, POP_BLOCK);
+    ADDOP(c, POP_TOP);
     if (nargs) {
         ADDOP(c, POP_TOP);
     }
@@ -5794,12 +5787,6 @@ compiler_pattern_class_default(
 static int
 compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
-    if (consume) {
-        ADDOP(c, POP_TOP);
-    }
-    else {
-        ADDOP_I(c, COPY, 2);
-    }
     asdl_expr_seq *args = p->v.Call.args;
     asdl_keyword_seq *kwargs = p->v.Call.keywords;
     Py_ssize_t nargs = asdl_seq_LEN(args);
@@ -5809,11 +5796,8 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
         return compiler_error(c, e, p->v.Call.func);
     }
     if (nargs == 0 && nkwargs == 0) {
-        if (consume) {
-            ADDOP(c, POP_TOP);
-        }
-        else {
-            ADDOP_I(c, COPY, 2);
+        if (!consume) {
+            ADDOP(c, DUP_TOP);
         }
         VISIT(c, expr, p->v.Call.func);
         ADDOP(c, ISINSTANCE);
@@ -5833,41 +5817,55 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
     if (nargs == 1 && nkwargs == 0) {
         basicblock *not_self;
         RETURN_IF_FALSE(not_self = compiler_new_block(c));
-        ADDOP(c, DUP_TOP);
+        ADDOP(c, MATCH_KIND);
         ADDOP_I(c, AND_BYTE, MATCH_SELF_FLAG);
+        /* Stack: subject match_kind&MATCH_SELF_FLAG */
         ADDOP_JUMP(c, POP_JUMP_IF_FALSE, not_self);
         NEXT_BLOCK(c);
-        if (consume) {
-            ADDOP(c, POP_TOP);
+        if (!consume) {
             ADDOP(c, DUP_TOP);
         }
-        else {
-            ADDOP_I(c, COPY, 2);
-            ADDOP(c, DUP_TOP);
-        }
+        /* Stack: [ subject ] subject */
+        ADDOP(c, DUP_TOP);
         VISIT(c, expr, p->v.Call.func);
         ADDOP(c, ISINSTANCE);
-        ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[0]);
+        /* Stack: [ subject ] subject bool */
+        ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[1]);
         NEXT_BLOCK(c);
         ADDOP_JUMP(c, JUMP_FORWARD, submatch);
+        /* Stack: subject */
         compiler_use_next_block(c, not_self);
     }
     basicblock *positional;
     RETURN_IF_FALSE(positional = compiler_new_block(c));
-    ADDOP_I(c, COPY, 2);
+    if (!consume) {
+        ADDOP(c, DUP_TOP);
+    }
+    ADDOP(c, DUP_TOP);
+    /* Stack: [ subject ] subject subject */
     VISIT(c, expr, p->v.Call.func);
     ADDOP(c, ISINSTANCE);
-    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, consume ? fail_pops[1] : fail);
+    /* Stack: [ subject ] subject bool */
+    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[1]);
     NEXT_BLOCK(c);
-    ADDOP(c, DUP_TOP);
+    ADDOP(c, MATCH_KIND);
     ADDOP_I(c, AND_BYTE, MATCH_DEFAULT_FLAG);
-    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, consume ? fail_pops[1] : fail);
+    /* Stack: [ subject ] subject match_kind&MATCH_DEFAULT_FLAG */
+    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[1]);
     NEXT_BLOCK(c);
+    /* Stack: [ subject ] subject */
     if (compiler_pattern_class_default(c, p->v.Call.func, args, kwargs, fail) == 0) {
         return 0;
     }
+    /* Stack: [ subject ] attributes * (nargs+kwnargs) */
     compiler_use_next_block(c, submatch);
     Py_ssize_t to_pop = nargs + nkwargs;
+    /* Need to flip order of subpatterns on stack */
+    int total_args = nargs + nkwargs;
+    if (total_args > 1) {
+        ADDOP_I(c, BUILD_TUPLE, total_args);
+        ADDOP_I(c, UNPACK_SEQUENCE, total_args);
+    }
     for (int i = 0; i < nargs; i++) {
         to_pop--;
         RETURN_IF_FALSE(compiler_pattern_subpattern(c, asdl_seq_GET(args, i), pc, fail_pops[to_pop]));
@@ -5877,13 +5875,14 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
         keyword_ty kw = (keyword_ty) asdl_seq_GET(kwargs, i);
         RETURN_IF_FALSE(compiler_pattern_subpattern(c, kw->value, pc, fail_pops[to_pop]));
     }
-    ADDOP_JUMP(c, JUMP_ABSOLUTE, end);
+    ADDOP_JUMP(c, JUMP_FORWARD, end);
     assert(to_pop == 0);
-    for (Py_ssize_t i = pop_count-1; i >= 0; i--) {
+    for (Py_ssize_t i = pop_count-1; i > 0; i--) {
         compiler_use_next_block(c, fail_pops[i]);
         ADDOP(c, POP_TOP);
     }
-    ADDOP_JUMP(c, JUMP_ABSOLUTE, fail);
+    compiler_use_next_block(c, fail_pops[0]);
+    ADDOP_JUMP(c, JUMP_FORWARD, fail);
     compiler_use_next_block(c, end);
     PyMem_Free(fail_pops);
     return 1;
@@ -5893,11 +5892,8 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
 static int
 compiler_pattern_literal(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
-    if (consume) {
-        ADDOP(c, POP_TOP);
-    }
-    else {
-        ADDOP_I(c, COPY, 2);
+    if (!consume) {
+        ADDOP(c, DUP_TOP);
     }
     assert(p->kind == Constant_kind);
     PyObject *v = p->v.Constant.value;
@@ -5915,7 +5911,7 @@ static int
 compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
     if (!consume) {
-        ADDOP(c, DUP_TOP_TWO);
+        ADDOP(c, DUP_TOP);
     }
     basicblock *end, *fail_pop_1, *fail_pop_3;
     RETURN_IF_FALSE(end = compiler_new_block(c));
@@ -5926,6 +5922,7 @@ compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, bas
     Py_ssize_t size = asdl_seq_LEN(values);
     // A starred pattern will be a keyless value. It is guaranteed to be last:
     int star = size ? !asdl_seq_GET(keys, size - 1) : 0;
+    ADDOP(c, MATCH_KIND);
     ADDOP_I(c, AND_BYTE, MATCH_MAPPING_FLAG);
     ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pop_1);
     NEXT_BLOCK(c);
@@ -6049,7 +6046,6 @@ compiler_pattern_or(struct compiler *c, expr_ty p, pattern_context *pc, basicblo
             }
             if (consume) {
                 ADDOP(c, POP_TOP);
-                ADDOP(c, POP_TOP);
             }
             ADDOP_JUMP(c, JUMP_ABSOLUTE, end);
         }
@@ -6116,21 +6112,16 @@ compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, ba
     basicblock *end, *fail_pop_1;
     RETURN_IF_FALSE(end = compiler_new_block(c));
     RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
-    if (!consume) {
-        ADDOP(c, DUP_TOP);
-    }
+    ADDOP(c, MATCH_KIND);
     ADDOP_I(c, AND_BYTE, MATCH_SEQUENCE_FLAG);
     ADDOP_JUMP(c, POP_JUMP_IF_FALSE, consume ? fail_pop_1 : fail);
     NEXT_BLOCK(c);
-    if (!consume) {
-        ADDOP_I(c, COPY, 2);
-    }
     if (star < 0) {
         // No star: len(subject) == size
         ADDOP(c, GET_LEN);
         ADDOP_LOAD_CONST_NEW(c, PyLong_FromSsize_t(size));
         ADDOP_COMPARE(c, Eq);
-        ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pop_1);
+        ADDOP_JUMP(c, POP_JUMP_IF_FALSE, consume ? fail_pop_1 : fail);
         NEXT_BLOCK(c);
     }
     else if (size > 1) {
@@ -6138,8 +6129,11 @@ compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, ba
         ADDOP(c, GET_LEN);
         ADDOP_LOAD_CONST_NEW(c, PyLong_FromSsize_t(size - 1));
         ADDOP_COMPARE(c, GtE);
-        ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pop_1);
+        ADDOP_JUMP(c, POP_JUMP_IF_FALSE, consume ? fail_pop_1 : fail);
         NEXT_BLOCK(c);
+    }
+    if (!consume) {
+        ADDOP(c, DUP_TOP);
     }
     if (only_wildcard) {
         // Patterns like: [] / [_] / [_, _] / [*_] / [_, *_] / [_, _, *_] / etc.
@@ -6163,11 +6157,8 @@ compiler_pattern_sequence(struct compiler *c, expr_ty p, pattern_context *pc, ba
 static int
 compiler_pattern_value(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
-    if (consume) {
-        ADDOP(c, POP_TOP);
-    }
-    else {
-        ADDOP_I(c, COPY, 2);
+    if (!consume) {
+        ADDOP(c, DUP_TOP);
     }
     assert(p->kind == Attribute_kind);
     assert(p->v.Attribute.ctx == Load);
@@ -6191,7 +6182,6 @@ compiler_pattern_wildcard(struct compiler *c, expr_ty p, pattern_context *pc, in
         return compiler_error(c, e);
     }
     if (consume) {
-        ADDOP(c, POP_TOP);
         ADDOP(c, POP_TOP);
     }
     return 1;
@@ -6239,7 +6229,6 @@ static int
 compiler_match(struct compiler *c, stmt_ty s)
 {
     VISIT(c, expr, s->v.Match.subject);
-    ADDOP(c, MATCH_KIND);
     basicblock *next, *end;
     RETURN_IF_FALSE(end = compiler_new_block(c));
     Py_ssize_t cases = asdl_seq_LEN(s->v.Match.cases);
@@ -6258,7 +6247,7 @@ compiler_match(struct compiler *c, stmt_ty s)
         // If pc.allow_irrefutable is 0, any name captures against our subject
         // will raise. Irrefutable cases must be either guarded, last, or both:
         pc.allow_irrefutable = m->guard != NULL || i == cases - 1;
-        // Only copy the subject if we're *not* on the last case:
+        // Consume the subject if we are on the last case:
         int result = compiler_pattern(c, m->pattern, &pc, next, i == cases - 1);
         Py_CLEAR(pc.stores);
         RETURN_IF_FALSE(result);
@@ -6266,7 +6255,7 @@ compiler_match(struct compiler *c, stmt_ty s)
         if (m->guard) {
             RETURN_IF_FALSE(compiler_jump_if(c, m->guard, next, 0));
         }
-        // Success! Pop the subject off, we're done with it:
+        // Success! Pop the subject off, we're done with it
         if (i != cases - 1) {
             ADDOP(c, POP_TOP);
         }
@@ -6305,9 +6294,9 @@ struct assembler {
 Py_LOCAL_INLINE(void)
 stackdepth_push(basicblock ***sp, basicblock *b, int depth)
 {
-    assert(b->b_startdepth < 0 || b->b_startdepth == depth);
+    //assert(b->b_startdepth < 0 || b->b_startdepth == depth);
     if (b->b_startdepth < depth && b->b_startdepth < 100) {
-        assert(b->b_startdepth < 0);
+        //assert(b->b_startdepth < 0);
         b->b_startdepth = depth;
         *(*sp)++ = b;
     }
@@ -6340,7 +6329,10 @@ stackdepth(struct compiler *c)
     while (sp != stack) {
         b = *--sp;
         int depth = b->b_startdepth;
-        assert(depth >= 0);
+        if (depth < 0) {
+            printf("Negative depth %d at offset %d\n", depth, b->b_offset);
+        }
+        //assert(depth >= 0);
         basicblock *next = b->b_next;
         for (int i = 0; i < b->b_iused; i++) {
             struct instr *instr = &b->b_instr[i];
@@ -6355,7 +6347,10 @@ stackdepth(struct compiler *c)
             if (new_depth > maxdepth) {
                 maxdepth = new_depth;
             }
-            assert(depth >= 0); /* invalid code or bug in stackdepth() */
+            if (depth < 0) {
+                printf("Negative depth %d at offset %d\n", depth, b->b_offset+i);
+            }
+            //assert(depth >= 0); /* invalid code or bug in stackdepth() */
             if (is_jump(instr)) {
                 effect = stack_effect(instr->i_opcode, instr->i_oparg, 1);
                 assert(effect != PY_INVALID_STACK_EFFECT);
@@ -6363,7 +6358,7 @@ stackdepth(struct compiler *c)
                 if (target_depth > maxdepth) {
                     maxdepth = target_depth;
                 }
-                assert(target_depth >= 0); /* invalid code or bug in stackdepth() */
+                //assert(target_depth >= 0); /* invalid code or bug in stackdepth() */
                 stackdepth_push(&sp, instr->i_target, target_depth);
             }
             depth = new_depth;
