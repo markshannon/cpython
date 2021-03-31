@@ -43,6 +43,9 @@
 #define COMP_SETCOMP  2
 #define COMP_DICTCOMP 3
 
+/* Artificial instruction, will be converted to LOAD_FAST */
+#define LOAD_CLOSURE 255
+
 #define IS_TOP_LEVEL_AWAIT(c) ( \
         (c->c_flags->cf_flags & PyCF_ALLOW_TOP_LEVEL_AWAIT) \
         && (c->u->u_ste->ste_type == ModuleBlock))
@@ -1101,8 +1104,6 @@ stack_effect(int opcode, int oparg, int jump)
                 return -1;
 
         /* Closures */
-        case LOAD_CLOSURE:
-            return 1;
         case LOAD_DEREF:
         case LOAD_CLASSDEREF:
             return 1;
@@ -6656,11 +6657,13 @@ offset_derefs(struct assembler *a, int nlocals)
         for (int i = 0; i < b->b_iused; i++) {
             struct instr *inst = &b->b_instr[i];
             switch(inst->i_opcode) {
+                case LOAD_CLOSURE:
+                    inst->i_opcode = LOAD_FAST;
+                    /* fall through */
                 case LOAD_DEREF:
                 case STORE_DEREF:
                 case DELETE_DEREF:
                 case LOAD_CLASSDEREF:
-                case LOAD_CLOSURE:
                     inst->i_oparg += nlocals;
             }
         }

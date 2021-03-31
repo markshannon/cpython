@@ -341,13 +341,14 @@ def _get_instructions_bytes(code, varnames=None, names=None, constants=None,
             elif op in hasjrel:
                 argval = offset + 2 + arg
                 argrepr = "to " + repr(argval)
-            elif op in haslocal:
-                argval, argrepr = _get_name_info(arg, varnames)
+            elif op in haslocal or op in hasfree:
+                if varnames is None or arg < len(varnames):
+                    argval, argrepr = _get_name_info(arg, varnames)
+                else:
+                    argval, argrepr = _get_name_info(arg-len(varnames), cells)
             elif op in hascompare:
                 argval = cmp_op[arg]
                 argrepr = argval
-            elif op in hasfree:
-                argval, argrepr = _get_name_info(arg-len(varnames), cells)
             elif op == FORMAT_VALUE:
                 argval, argrepr = FORMAT_VALUE_CONVERTERS[arg & 0x3]
                 argval = (argval, bool(arg & 0x4))
