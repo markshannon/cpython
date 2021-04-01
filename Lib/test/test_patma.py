@@ -2563,23 +2563,14 @@ class TestPatma(unittest.TestCase):
 
     @no_perf
     def test_patma_253(self):
-        class Class:
-            __match_args__ = ["a", "a"]
-            a = None
-        x = Class()
-        w = y = z = None
         with self.assertRaises(TypeError):
-            match x:
-                case Class(y, z):
-                    w = 0
-        self.assertIs(w, None)
-        self.assertIs(y, None)
-        self.assertIs(z, None)
+            class Class:
+                __match_args__ = ("a", "a")
 
     @no_perf
     def test_patma_254(self):
         class Class:
-            __match_args__ = ["a"]
+            __match_args__ = ("a")
             a = None
         x = Class()
         w = y = z = None

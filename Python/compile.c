@@ -5717,6 +5717,22 @@ compiler_pattern_class_default(
     /* Stack: subject */
     Py_ssize_t nargs = asdl_seq_LEN(args);
     Py_ssize_t nkwargs = asdl_seq_LEN(kwargs);
+    if (nkwargs) {
+        PyObject *kwset = PySet_New(NULL);
+        if (kwset == NULL) {
+            return 0;
+        }
+        for (int i = 0; i < nkwargs; i++) {
+            keyword_ty kw = (keyword_ty) asdl_seq_GET(kwargs, i);
+            if (PySet_Contains(kwset, kw->arg)) {
+                compiler_error(c, "duplicate keyord in class pattern");
+                Py_DECREF(kwset);
+                return 0;
+            }
+            PySet_Add(kwset, kw->arg);
+        }
+        Py_DECREF(kwset);
+    }
     if (nargs) {
         VISIT(c, expr, cls);
         ADDOP(c, MATCH_ARGS);
@@ -5805,6 +5821,11 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
         NEXT_BLOCK(c);
         return 1;
     }
+    ADDOP(c, DUP_TOP);
+    VISIT(c, expr, p->v.Call.func);
+    ADDOP(c, ISINSTANCE);
+    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail);
+    NEXT_BLOCK(c);
     Py_ssize_t pop_count = nargs + nkwargs;
     pop_count = pop_count < 2 ? 2 : pop_count;
     basicblock **fail_pops = PyMem_Malloc(sizeof(basicblock *)*pop_count);
@@ -5826,12 +5847,6 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
             ADDOP(c, DUP_TOP);
         }
         /* Stack: [ subject ] subject */
-        ADDOP(c, DUP_TOP);
-        VISIT(c, expr, p->v.Call.func);
-        ADDOP(c, ISINSTANCE);
-        /* Stack: [ subject ] subject bool */
-        ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[1]);
-        NEXT_BLOCK(c);
         ADDOP_JUMP(c, JUMP_FORWARD, submatch);
         /* Stack: subject */
         compiler_use_next_block(c, not_self);
@@ -5841,16 +5856,9 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
     if (!consume) {
         ADDOP(c, DUP_TOP);
     }
-    ADDOP(c, DUP_TOP);
-    /* Stack: [ subject ] subject subject */
-    VISIT(c, expr, p->v.Call.func);
-    ADDOP(c, ISINSTANCE);
-    /* Stack: [ subject ] subject bool */
-    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[1]);
-    NEXT_BLOCK(c);
     ADDOP(c, MATCH_KIND);
-    ADDOP_I(c, AND_BYTE, MATCH_DEFAULT_FLAG);
-    /* Stack: [ subject ] subject match_kind&MATCH_DEFAULT_FLAG */
+    ADDOP_I(c, AND_BYTE, nargs ? MATCH_DEFAULT_FLAG : (MATCH_DEFAULT_FLAG|MATCH_SELF_FLAG));
+    /* Stack: [ subject ] subject flag(s) */
     ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[1]);
     NEXT_BLOCK(c);
     /* Stack: [ subject ] subject */
