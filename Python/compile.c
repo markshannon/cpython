@@ -5855,7 +5855,7 @@ compiler_pattern_class(struct compiler *c, expr_ty p, pattern_context *pc, basic
         ADDOP(c, DUP_TOP);
     }
     ADDOP(c, MATCH_KIND);
-    ADDOP_I(c, AND_BYTE, nargs ? MATCH_DEFAULT_FLAG : (MATCH_DEFAULT_FLAG|MATCH_SELF_FLAG));
+    ADDOP_I(c, AND_BYTE, MATCH_DEFAULT_FLAG);
     /* Stack: [ subject ] subject flag(s) */
     ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pops[1]);
     NEXT_BLOCK(c);

@@ -2017,17 +2017,9 @@ class TestPatma(unittest.TestCase):
         self.assertIs(f(3.0), None)
 
     def test_patma_200(self):
-        class Class:
-            __match_args__ = ["a", "b"]
-        c = Class()
-        c.a = 0
-        c.b = 1
-        match c:
-            case Class(x, y):
-                z = 0
-        self.assertIs(x, c.a)
-        self.assertIs(y, c.b)
-        self.assertEqual(z, 0)
+        with self.assertRaises(TypeError):
+            class Class:
+                __match_args__ = ["a", "b"]
 
     def test_patma_201(self):
         class Class:
@@ -2046,7 +2038,7 @@ class TestPatma(unittest.TestCase):
         class Parent:
             __match_args__ = "a", "b"
         class Child(Parent):
-            __match_args__ = ["c", "d"]
+            __match_args__ = ("c", "d")
         c = Child()
         c.a = 0
         c.b = 1
@@ -2473,51 +2465,26 @@ class TestPatma(unittest.TestCase):
 
     @no_perf
     def test_patma_246(self):
-        class Class:
-            __match_args__ = None
-        x = Class()
-        y = z = None
         with self.assertRaises(TypeError):
-            match x:
-                case Class(y):
-                    z = 0
-        self.assertIs(y, None)
-        self.assertIs(z, None)
+            class Class:
+                __match_args__ = None
 
     @no_perf
     def test_patma_247(self):
-        class Class:
-            __match_args__ = "XYZ"
-        x = Class()
-        y = z = None
-        # With illegal __match_args__ any behavior is allowed
-        # However, we shouldn't match in this case.
-        try:
-            match x:
-                case Class(y):
-                    z = 0
-        except:
-            pass
-        self.assertIs(y, None)
-        self.assertIs(z, None)
+        with self.assertRaises(TypeError):
+            class Class:
+                __match_args__ = "XYZ"
 
     @no_perf
     def test_patma_248(self):
-        class Class:
-            __match_args__ = [None]
-        x = Class()
-        y = z = None
         with self.assertRaises(TypeError):
-            match x:
-                case Class(y):
-                    z = 0
-        self.assertIs(y, None)
-        self.assertIs(z, None)
+            class Class:
+                __match_args__ = None,
 
     @no_perf
     def test_patma_249(self):
         class Class:
-            __match_args__ = []
+            __match_args__ = ()
         x = Class()
         y = z = None
         with self.assertRaises(TypeError):
@@ -2570,7 +2537,7 @@ class TestPatma(unittest.TestCase):
     @no_perf
     def test_patma_254(self):
         class Class:
-            __match_args__ = ("a")
+            __match_args__ = ("a",)
             a = None
         x = Class()
         w = y = z = None
@@ -2791,7 +2758,7 @@ class TestPatma(unittest.TestCase):
     def test_patma_277(self):
         x = [[{0: 0}]]
         match x:
-            case list([({-0-0j: int(real=0+0j, imag=0-0j) | (1) as z},)]):
+            case list([({-0-0j: int(0) | (1) as z},)]):
                 y = 0
         self.assertEqual(x, [[{0: 0}]])
         self.assertEqual(y, 0)

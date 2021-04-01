@@ -61,6 +61,7 @@ _Py_IDENTIFIER(__getitem__);
 _Py_IDENTIFIER(__hash__);
 _Py_IDENTIFIER(__init_subclass__);
 _Py_IDENTIFIER(__len__);
+_Py_IDENTIFIER(__match_args__);
 _Py_IDENTIFIER(__module__);
 _Py_IDENTIFIER(__name__);
 _Py_IDENTIFIER(__new__);
@@ -958,6 +959,36 @@ type___subclasscheck___impl(PyTypeObject *self, PyObject *subclass)
     return _PyObject_RealIsSubclass(subclass, (PyObject *)self);
 }
 
+static int
+verify_matchargs(PyObject *m)
+{
+    PyObject *set = PySet_New(NULL);
+    if (set == NULL) {
+        return -1;
+    }
+    if (!PyTuple_CheckExact(m)) {
+        goto error;
+
+    }
+    for (Py_ssize_t i = 0; i < Py_SIZE(m); i++) {
+        if (!PyUnicode_CheckExact(PyTuple_GET_ITEM(m, i))) {
+            goto error;
+        }
+        if (PySet_Contains(set, PyTuple_GET_ITEM(m, i))) {
+            goto error;
+        }
+        if (PySet_Add(set, PyTuple_GET_ITEM(m, i))) {
+            return -1;
+        }
+    }
+    Py_DECREF(set);
+    return 0;
+error:
+    Py_DECREF(set);
+    PyErr_SetString(PyExc_TypeError,
+                    "__match_args__ must be a tuple of unique strings.");
+    return -1;
+}
 
 static PyGetSetDef type_getsets[] = {
     {"__name__", (getter)type_name, (setter)type_set_name, NULL},
@@ -2740,6 +2771,18 @@ type_new(PyTypeObject *metatype, PyObject *args, PyObject *kwds)
         }
     }
 
+    /* If __match_args__ is present check that it is a tuple of strings */
+    tmp = _PyDict_GetItemIdWithError(dict, &PyId___match_args__);
+    if (tmp != NULL) {
+        if (verify_matchargs(tmp)) {
+            goto error;
+        }
+    }
+    else {
+        if (PyErr_Occurred()) {
+            goto error;
+        }
+    }
     /* Special-case __new__: if it's a plain function,
        make it a static function */
     tmp = _PyDict_GetItemIdWithError(dict, &PyId___new__);
