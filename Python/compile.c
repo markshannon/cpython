@@ -925,6 +925,9 @@ stack_effect(int opcode, int oparg, int jump)
         case UNARY_INVERT:
             return 0;
 
+        case UNIQUE:
+            return 1;
+
         case SET_ADD:
         case LIST_APPEND:
             return -1;
@@ -1146,8 +1149,6 @@ stack_effect(int opcode, int oparg, int jump)
         case DICT_MERGE:
         case DICT_UPDATE:
             return -1;
-        case COPY_DICT_WITHOUT_KEYS:
-            return 0;
         case GET_LEN:
         case MATCH_KIND:
             return 1;
@@ -1156,8 +1157,6 @@ stack_effect(int opcode, int oparg, int jump)
         case ISINSTANCE:
         case GET_ATTR:
             return -1;
-        case MATCH_KEYS:
-            return 2;
         case AND_BYTE:
         case TUPLE_HEAD:
             return 0;
@@ -5916,13 +5915,21 @@ compiler_pattern_literal(struct compiler *c, expr_ty p, pattern_context *pc, bas
 static int
 compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, basicblock *fail, int consume)
 {
+    /* TO DO -- Check for duplicate keys
+     * If all keys are literals, check at compile time and raise a SyntaxError
+     * If any keys are not literals, need to perform a runtime check:
+     *   Start with a set of all literal keys. For each other key, add to set if not present, else
+     */
     if (!consume) {
         ADDOP(c, DUP_TOP);
     }
-    basicblock *end, *fail_pop_1, *fail_pop_3;
+    basicblock *end, *fail_pop_1, *fail_pop_2;
+    basicblock *fail_pop_3, *fail_pop_4;
     RETURN_IF_FALSE(end = compiler_new_block(c));
     RETURN_IF_FALSE(fail_pop_1 = compiler_new_block(c));
+    RETURN_IF_FALSE(fail_pop_2 = compiler_new_block(c));
     RETURN_IF_FALSE(fail_pop_3 = compiler_new_block(c));
+    RETURN_IF_FALSE(fail_pop_4 = compiler_new_block(c));
     asdl_expr_seq *keys = p->v.Dict.keys;
     asdl_expr_seq *values = p->v.Dict.values;
     Py_ssize_t size = asdl_seq_LEN(values);
@@ -5953,56 +5960,62 @@ compiler_pattern_mapping(struct compiler *c, expr_ty p, pattern_context *pc, bas
     if (INT_MAX < size - star - 1) {
         return compiler_error(c, "too many sub-patterns in mapping pattern");
     }
-    // Collect all of the keys into a tuple for MATCH_KEYS and
-    // COPY_DICT_WITHOUT_KEYS. They can either be dotted names or literals:
+    if (star) {
+        ADDOP_I(c, BUILD_MAP, 0);
+        ADDOP(c, ROT_TWO);
+        ADDOP_I(c, DICT_UPDATE, 1);
+        ADDOP(c, DUP_TOP);
+        PyObject *pop = PyUnicode_FromString("pop");
+        if (pop == NULL) {
+            return 0;
+        }
+        ADDOP_NAME(c, LOAD_ATTR, pop, names);
+        Py_DECREF(pop);
+    }
+    else {
+        PyObject *get = PyUnicode_FromString("get");
+        if (get == NULL) {
+            return 0;
+        }
+        ADDOP_NAME(c, LOAD_ATTR, get, names);
+        Py_DECREF(get);
+    }
+    ADDOP(c, UNIQUE);
     for (Py_ssize_t i = 0; i < size - star; i++) {
         expr_ty key = asdl_seq_GET(keys, i);
+        expr_ty value = asdl_seq_GET(values, i);
         if (key == NULL) {
             const char *e = "can't use starred name here "
                             "(consider moving to end)";
             return compiler_error(c, e);
         }
+        ADDOP(c, DUP_TOP_TWO);
         VISIT(c, expr, key);
-    }
-    ADDOP_I(c, BUILD_TUPLE, size - star);
-    ADDOP(c, MATCH_KEYS);
-    ADDOP_JUMP(c, POP_JUMP_IF_FALSE, fail_pop_3);
-    NEXT_BLOCK(c);
-    // So far so good. There's now a tuple of values on the stack to match
-    // sub-patterns against:
-    for (Py_ssize_t i = 0; i < size - star; i++) {
-        expr_ty value = asdl_seq_GET(values, i);
-        if (WILDCARD_CHECK(value)) {
-            continue;
-        }
-        ADDOP(c, DUP_TOP);
-        ADDOP_LOAD_CONST_NEW(c, PyLong_FromSsize_t(i));
-        ADDOP(c, BINARY_SUBSCR);
-        RETURN_IF_FALSE(compiler_pattern_subpattern(c, value, pc, fail_pop_3));
+        ADDOP(c, ROT_TWO);
+        ADDOP_I(c, CALL_FUNCTION, 2);
+        ADDOP(c, DUP_TOP_TWO);
+        ADDOP_I(c, IS_OP, 0);
+        ADDOP_JUMP(c, POP_JUMP_IF_TRUE, star ? fail_pop_4 : fail_pop_3);
+        NEXT_BLOCK(c);
+        RETURN_IF_FALSE(compiler_pattern_subpattern(c, value, pc, star ? fail_pop_3 : fail_pop_2));
         NEXT_BLOCK(c);
     }
-    // If we get this far, it's a match! We're done with that tuple of values.
+    ADDOP(c, POP_TOP);
     ADDOP(c, POP_TOP);
     if (star) {
-        // If we had a starred name, bind a dict of remaining items to it:
-        ADDOP(c, COPY_DICT_WITHOUT_KEYS);
         PyObject *id = asdl_seq_GET(values, size - 1)->v.Name.id;
         RETURN_IF_FALSE(pattern_helper_store_name(c, id, pc));
     }
-    else {
-        // Otherwise, we don't care about this tuple of keys anymore:
-        ADDOP(c, POP_TOP);
-    }
-    // Pop the subject:
-    ADDOP(c, POP_TOP);
     ADDOP_JUMP(c, JUMP_FORWARD, end);
     // The top two items are a tuple of values or None, followed by a tuple of
     // keys. Pop them both:
+    compiler_use_next_block(c, fail_pop_4);
+    ADDOP(c, POP_TOP);
     compiler_use_next_block(c, fail_pop_3);
     ADDOP(c, POP_TOP);
+    compiler_use_next_block(c, fail_pop_2);
     ADDOP(c, POP_TOP);
     compiler_use_next_block(c, fail_pop_1);
-    // Pop the subject:
     ADDOP(c, POP_TOP);
     ADDOP_JUMP(c, JUMP_ABSOLUTE, fail);
     compiler_use_next_block(c, end);

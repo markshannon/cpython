@@ -890,97 +890,6 @@ _Py_CheckRecursiveCall(PyThreadState *tstate, const char *where)
     return 0;
 }
 
-
-// PEP 634: Structural Pattern Matching
-
-
-// Return a tuple of values corresponding to keys, with error checks for
-// duplicate/missing keys.
-static PyObject*
-match_keys(PyThreadState *tstate, PyObject *map, PyObject *keys)
-{
-    assert(PyTuple_CheckExact(keys));
-    Py_ssize_t nkeys = PyTuple_GET_SIZE(keys);
-    if (!nkeys) {
-        // No keys means no items.
-        return PyTuple_New(0);
-    }
-    PyObject *seen = NULL;
-    PyObject *dummy = NULL;
-    PyObject *values = NULL;
-    // We use the two argument form of map.get(key, default) for two reasons:
-    // - Atomically check for a key and get its value without error handling.
-    // - Don't cause key creation or resizing in dict subclasses like
-    //   collections.defaultdict that define __missing__ (or similar).
-    _Py_IDENTIFIER(get);
-    PyObject *get = _PyObject_GetAttrId(map, &PyId_get);
-    if (get == NULL) {
-        goto fail;
-    }
-    seen = PySet_New(NULL);
-    if (seen == NULL) {
-        goto fail;
-    }
-    // dummy = object()
-    dummy = _PyObject_CallNoArg((PyObject *)&PyBaseObject_Type);
-    if (dummy == NULL) {
-        goto fail;
-    }
-    values = PyList_New(0);
-    if (values == NULL) {
-        goto fail;
-    }
-    for (Py_ssize_t i = 0; i < nkeys; i++) {
-        PyObject *key = PyTuple_GET_ITEM(keys, i);
-        if (PySet_Contains(seen, key) || PySet_Add(seen, key)) {
-            if (!_PyErr_Occurred(tstate)) {
-                // Seen it before!
-                _PyErr_Format(tstate, PyExc_ValueError,
-                              "mapping pattern checks duplicate key (%R)", key);
-            }
-            goto fail;
-        }
-        PyObject *value = PyObject_CallFunctionObjArgs(get, key, dummy, NULL);
-        if (value == NULL) {
-            goto fail;
-        }
-        if (value == dummy) {
-            // key not in map!
-            Py_DECREF(value);
-            Py_DECREF(values);
-            // Return None:
-            Py_INCREF(Py_None);
-            values = Py_None;
-            goto done;
-        }
-        PyList_Append(values, value);
-        Py_DECREF(value);
-    }
-    Py_SETREF(values, PyList_AsTuple(values));
-    // Success:
-done:
-    Py_DECREF(get);
-    Py_DECREF(seen);
-    Py_DECREF(dummy);
-    return values;
-fail:
-    Py_XDECREF(get);
-    Py_XDECREF(seen);
-    Py_XDECREF(dummy);
-    Py_XDECREF(values);
-    return NULL;
-}
-
-
-static inline int
-string_eq(PyObject *s1, PyObject *s2)
-{
-    if (s1 == s2) {
-        return 1;
-    }
-    return _PyUnicode_EQ(s1, s2);
-}
-
 static int do_raise(PyThreadState *tstate, PyObject *exc, PyObject *cause);
 static int unpack_iterable(PyThreadState *, PyObject *, int, int, PyObject **);
 
@@ -3821,50 +3730,12 @@ main_loop:
             DISPATCH();
         }
 
-        case TARGET(MATCH_KEYS): {
-            // On successful match for all keys, PUSH(values) and PUSH(True).
-            // Otherwise, PUSH(None) and PUSH(False).
-            PyObject *keys = TOP();
-            PyObject *subject = SECOND();
-            PyObject *values_or_none = match_keys(tstate, subject, keys);
-            if (values_or_none == NULL) {
+        case TARGET(UNIQUE): {
+            PyObject *unique = _PyObject_Vectorcall((PyObject *)&PyBaseObject_Type, NULL, 0, NULL);
+            if (unique == NULL) {
                 goto error;
             }
-            PUSH(values_or_none);
-            if (values_or_none == Py_None) {
-                Py_INCREF(Py_False);
-                PUSH(Py_False);
-                DISPATCH();
-            }
-            assert(PyTuple_CheckExact(values_or_none));
-            Py_INCREF(Py_True);
-            PUSH(Py_True);
-            DISPATCH();
-        }
-
-        case TARGET(COPY_DICT_WITHOUT_KEYS): {
-            // rest = dict(TOS1)
-            // for key in TOS:
-            //     del rest[key]
-            // SET_TOP(rest)
-            PyObject *keys = TOP();
-            PyObject *subject = SECOND();
-            PyObject *rest = PyDict_New();
-            if (rest == NULL || PyDict_Update(rest, subject)) {
-                Py_XDECREF(rest);
-                goto error;
-            }
-            // This may seem a bit inefficient, but keys is rarely big enough to
-            // actually impact runtime.
-            assert(PyTuple_CheckExact(keys));
-            for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(keys); i++) {
-                if (PyDict_DelItem(rest, PyTuple_GET_ITEM(keys, i))) {
-                    Py_DECREF(rest);
-                    goto error;
-                }
-            }
-            Py_DECREF(keys);
-            SET_TOP(rest);
+            PUSH(unique);
             DISPATCH();
         }
 

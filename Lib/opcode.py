@@ -65,6 +65,7 @@ def_op('NOP', 9)
 def_op('UNARY_POSITIVE', 10)
 def_op('UNARY_NEGATIVE', 11)
 def_op('UNARY_NOT', 12)
+def_op('UNIQUE', 13)
 
 def_op('UNARY_INVERT', 15)
 def_op('BINARY_MATRIX_MULTIPLY', 16)
@@ -84,8 +85,6 @@ def_op('INPLACE_TRUE_DIVIDE', 29)
 def_op('GET_LEN', 30)
 def_op('GET_ATTR', 31)
 
-def_op('MATCH_KEYS', 33)
-def_op('COPY_DICT_WITHOUT_KEYS', 34)
 def_op('MATCH_KIND', 35)
 
 def_op('MATCH_ARGS', 42)

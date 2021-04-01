@@ -17,6 +17,7 @@ extern "C" {
 #define UNARY_POSITIVE           10
 #define UNARY_NEGATIVE           11
 #define UNARY_NOT                12
+#define UNIQUE                   13
 #define UNARY_INVERT             15
 #define BINARY_MATRIX_MULTIPLY   16
 #define INPLACE_MATRIX_MULTIPLY  17
@@ -32,8 +33,6 @@ extern "C" {
 #define INPLACE_TRUE_DIVIDE      29
 #define GET_LEN                  30
 #define GET_ATTR                 31
-#define MATCH_KEYS               33
-#define COPY_DICT_WITHOUT_KEYS   34
 #define MATCH_KIND               35
 #define MATCH_ARGS               42
 #define WITH_EXCEPT_START        49
