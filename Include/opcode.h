@@ -127,7 +127,6 @@ extern "C" {
 #define LOAD_CLASSDEREF         148
 #define COPY                    149
 #define TUPLE_HEAD              150
-#define MATCH_CLASS             152
 #define SETUP_ASYNC_WITH        154
 #define FORMAT_VALUE            155
 #define BUILD_CONST_KEY_MAP     156

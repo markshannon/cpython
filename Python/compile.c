@@ -1148,8 +1148,6 @@ stack_effect(int opcode, int oparg, int jump)
             return -1;
         case COPY_DICT_WITHOUT_KEYS:
             return 0;
-        case MATCH_CLASS:
-            return -1;
         case GET_LEN:
         case MATCH_KIND:
             return 1;

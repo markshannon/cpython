@@ -204,8 +204,6 @@ hasfree.append(148)
 def_op('COPY', 149)
 def_op('TUPLE_HEAD', 150)
 
-def_op('MATCH_CLASS', 152)
-
 jrel_op('SETUP_ASYNC_WITH', 154)
 def_op('FORMAT_VALUE', 155)
 def_op('BUILD_CONST_KEY_MAP', 156)

@@ -151,7 +151,7 @@ static void *opcode_targets[256] = {
     &&TARGET_COPY,
     &&TARGET_TUPLE_HEAD,
     &&_unknown_opcode,
-    &&TARGET_MATCH_CLASS,
+    &&_unknown_opcode,
     &&_unknown_opcode,
     &&TARGET_SETUP_ASYNC_WITH,
     &&TARGET_FORMAT_VALUE,
