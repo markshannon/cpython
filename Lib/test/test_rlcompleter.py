@@ -48,12 +48,13 @@ class TestRlcompleter(unittest.TestCase):
                          ['CompleteMe()'])
 
     def test_attr_matches(self):
+        NON_METHODS = ('__doc__', '__match_kind__', '__match_args__')
         # test with builtins namespace
         self.assertEqual(self.stdcompleter.attr_matches('str.s'),
                          ['str.{}('.format(x) for x in dir(str)
                           if x.startswith('s')])
         self.assertEqual(self.stdcompleter.attr_matches('tuple.foospamegg'), [])
-        expected = sorted({'None.%s%s' % (x, '(' if (x != '__doc__' and x != '__match_kind__') else '')
+        expected = sorted({'None.%s%s' % (x, '(' if x not in NON_METHODS else '')
                            for x in dir(None)})
         self.assertEqual(self.stdcompleter.attr_matches('None.'), expected)
         self.assertEqual(self.stdcompleter.attr_matches('None._'), expected)
