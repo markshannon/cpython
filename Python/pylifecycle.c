@@ -712,8 +712,6 @@ pycore_init_types(PyInterpreterState *interp)
         }
     }
 
-    }
-
     /* TO DO -- There's probably a better way to do this, and it needs error checking. */
     if (PyDict_SetItemString(PyBaseObject_Type.tp_dict, "__match_args__", PyTuple_New(0))) {
         return _PyStatus_ERR("can't set object.__match_args__");
@@ -756,6 +754,7 @@ pycore_init_types(PyInterpreterState *interp)
     }
     if (set_match_kind(&PyMemoryView_Type, MATCH_SEQUENCE_FLAG | MATCH_DEFAULT_FLAG)) {
         return _PyStatus_ERR("can't set memoryview.__match_kind__");
+    }
     return _PyStatus_OK();
 }
 

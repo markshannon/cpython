@@ -1717,7 +1717,7 @@ main_loop:
             PyObject *copy = PEEK(oparg);
             Py_INCREF(copy);
             PUSH(copy);
-            FAST_DISPATCH();
+            DISPATCH();
         }
 
         case TARGET(UNARY_POSITIVE): {
