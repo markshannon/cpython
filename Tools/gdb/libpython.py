@@ -633,6 +633,23 @@ class PyCFunctionObjectPtr(PyObjectPtr):
         else:
             return BuiltInMethodProxy(ml_name, pyop_m_self)
 
+def varint_decode_unsigned(table_iter):
+    val = 0
+    for b in table_iter:
+        b = ord(b)
+        val << 7
+        val |= (b&127)
+        if not (b&128):
+            return val
+
+def varint_decode_signed(table_iter):
+    uint = varint_decode_unsigned(table_iter)
+    if uint == 1:
+        return None
+    if uint & 1:
+        return -(uint>>1)
+    else:
+        return uint>>1
 
 class PyCodeObjectPtr(PyObjectPtr):
     """
@@ -649,27 +666,20 @@ class PyCodeObjectPtr(PyObjectPtr):
         Objects/lnotab_notes.txt
         '''
         co_linetable = self.pyop_field('co_linetable').proxyval(set())
-
-        # Initialize lineno to co_firstlineno as per PyCode_Addr2Line
-        # not 0, as lnotab_notes.txt has it:
         lineno = int_from_int(self.field('co_firstlineno'))
 
         if addrq < 0:
             return lineno
         addr = 0
-        for addr_incr, line_incr in zip(co_linetable[::2], co_linetable[1::2]):
-            if addr_incr == 255:
-                break
-            addr += ord(addr_incr)
-            line_delta = ord(line_incr)
-            if line_delta == 128:
-                line_delta = 0
-            elif line_delta > 128:
-                line_delta -= 256
-            lineno += line_delta
+        tableiter = iter(co_linetable)
+        while True:
+            sdelta = varint_decode_unsigned(tableiter)
+            ldelta = varint_decode_signed(tableiter)
+            if ldelta is not None:
+                lineno += ldelta
+            addr += sdelta
             if addr > addrq:
                 return lineno
-        assert False, "Unreachable"
 
 
 class PyDictObjectPtr(PyObjectPtr):
@@ -941,10 +951,6 @@ class PyFrameObjectPtr(PyObjectPtr):
         '''
         if self.is_optimized_out():
             return None
-        f_trace = self.field('f_trace')
-        if long(f_trace) != 0:
-            # we have a non-NULL f_trace:
-            return self.f_lineno
 
         try:
             return self.co.addr2line(self.f_lasti*2)

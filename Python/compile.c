@@ -30,8 +30,6 @@
 
 #define NEED_OPCODE_JUMP_TABLES
 #include "opcode.h"               // EXTENDED_ARG
-#include "wordcode_helpers.h"     // instrsize()
-
 
 #define DEFAULT_BLOCK_SIZE 16
 #define DEFAULT_BLOCKS 8
@@ -77,6 +75,24 @@ struct instr {
     struct basicblock_ *i_target; /* target block (if jump instruction) */
     int i_lineno;
 };
+
+/* Pseudo instruction that doesn't generate code in assembler */
+#define ZERO_WIDTH 255
+
+/* Minimum number of code units necessary to encode instruction with
+   EXTENDED_ARGs */
+static int
+instrsize(struct instr *i)
+{
+    if (i->i_opcode == ZERO_WIDTH) {
+        return 0;
+    }
+    int oparg = i->i_oparg;
+    return oparg <= 0xff ? 1 :
+        oparg <= 0xffff ? 2 :
+        oparg <= 0xffffff ? 3 :
+        4;
+}
 
 #define LOG_BITS_PER_INT 5
 #define MASK_LOW_LOG_BITS 31
@@ -934,6 +950,7 @@ stack_effect(int opcode, int oparg, int jump)
     switch (opcode) {
         case NOP:
         case EXTENDED_ARG:
+        case ZERO_WIDTH:
             return 0;
 
         /* Stack manipulation */
@@ -1197,6 +1214,9 @@ stack_effect(int opcode, int oparg, int jump)
 int
 PyCompile_OpcodeStackEffectWithJump(int opcode, int oparg, int jump)
 {
+    if (opcode == ZERO_WIDTH) {
+        return PY_INVALID_STACK_EFFECT;
+    }
     return stack_effect(opcode, oparg, jump);
 }
 
@@ -6386,24 +6406,24 @@ blocksize(basicblock *b)
     int size = 0;
 
     for (i = 0; i < b->b_iused; i++)
-        size += instrsize(b->b_instr[i].i_oparg);
+        size += instrsize(&b->b_instr[i]);
     return size;
 }
 
-static int
-assemble_emit_linetable_pair(struct assembler *a, int bdelta, int ldelta)
+static inline unsigned char *
+write_varint(unsigned char *p, int i)
 {
-    Py_ssize_t len = PyBytes_GET_SIZE(a->a_lnotab);
-    if (a->a_lnotab_off + 2 >= len) {
-        if (_PyBytes_Resize(&a->a_lnotab, len * 2) < 0)
-            return 0;
+
+    assert(i >= 0);
+    int shift = 28;
+    while (shift > 0) {
+        if (i >> shift) {
+            *p++ = ((i >> shift)&0x7f) | 0x80;
+        }
+        shift -= 7;
     }
-    unsigned char *lnotab = (unsigned char *) PyBytes_AS_STRING(a->a_lnotab);
-    lnotab += a->a_lnotab_off;
-    a->a_lnotab_off += 2;
-    *lnotab++ = bdelta;
-    *lnotab++ = ldelta;
-    return 1;
+    *p++ = i &0x7f;
+    return p;
 }
 
 /* Appends a range to the end of the line number table. See
@@ -6412,41 +6432,33 @@ assemble_emit_linetable_pair(struct assembler *a, int bdelta, int ldelta)
 static int
 assemble_line_range(struct assembler *a)
 {
-    int ldelta, bdelta;
-    bdelta =  (a->a_offset - a->a_lineno_start) * 2;
-    if (bdelta == 0) {
+    if (a->a_offset == 0) {
         return 1;
     }
+    Py_ssize_t len = PyBytes_GET_SIZE(a->a_lnotab);
+    if (a->a_lnotab_off + 10 >= len) {
+        if (_PyBytes_Resize(&a->a_lnotab, len * 2) < 0)
+            return 0;
+    }
+    unsigned char *lnotab = (unsigned char *) PyBytes_AS_STRING(a->a_lnotab);
+    unsigned char *p = lnotab + a->a_lnotab_off;
+    int bdelta = (a->a_offset - a->a_lineno_start) * 2;
+    int ldelta;
     if (a->a_lineno < 0) {
-        ldelta = -128;
+        ldelta = 1; /* None */
     }
     else {
-        ldelta = a->a_lineno - a->a_prevlineno;
+        if (a->a_lineno < a->a_prevlineno) {
+            ldelta = ((a->a_prevlineno-a->a_lineno) << 1) | 1;
+        }
+        else {
+            ldelta = (a->a_lineno - a->a_prevlineno) << 1;
+        }
         a->a_prevlineno = a->a_lineno;
-        while (ldelta > 127) {
-            if (!assemble_emit_linetable_pair(a, 0, 127)) {
-                return 0;
-            }
-            ldelta -= 127;
-        }
-        while (ldelta < -127) {
-            if (!assemble_emit_linetable_pair(a, 0, -127)) {
-                return 0;
-            }
-            ldelta += 127;
-        }
     }
-    assert(-128 <= ldelta && ldelta < 128);
-    while (bdelta > 254) {
-        if (!assemble_emit_linetable_pair(a, 254, ldelta)) {
-            return 0;
-        }
-        ldelta = a->a_lineno < 0 ? -128 : 0;
-        bdelta -= 254;
-    }
-    if (!assemble_emit_linetable_pair(a, bdelta, ldelta)) {
-        return 0;
-    }
+    p = write_varint(p, bdelta);
+    p = write_varint(p, ldelta);
+    a->a_lnotab_off = p - lnotab;
     a->a_lineno_start = a->a_offset;
     return 1;
 }
@@ -6464,21 +6476,19 @@ assemble_lnotab(struct assembler *a, struct instr *i)
     return 1;
 }
 
-
-/* assemble_emit()
-   Extend the bytecode with a new instruction.
-   Update lnotab if necessary.
-*/
+#ifdef WORDS_BIGENDIAN
+#  define PACKOPARG(opcode, oparg) ((_Py_CODEUNIT)(((opcode) << 8) | (oparg)))
+#else
+#  define PACKOPARG(opcode, oparg) ((_Py_CODEUNIT)(((oparg) << 8) | (opcode)))
+#endif
 
 static int
 assemble_emit(struct assembler *a, struct instr *i)
 {
-    int size, arg = 0;
     Py_ssize_t len = PyBytes_GET_SIZE(a->a_bytecode);
     _Py_CODEUNIT *code;
 
-    arg = i->i_oparg;
-    size = instrsize(arg);
+    int size = instrsize(i);
     if (i->i_lineno && !assemble_lnotab(a, i))
         return 0;
     if (a->a_offset + size >= len / (int)sizeof(_Py_CODEUNIT)) {
@@ -6489,7 +6499,24 @@ assemble_emit(struct assembler *a, struct instr *i)
     }
     code = (_Py_CODEUNIT *)PyBytes_AS_STRING(a->a_bytecode) + a->a_offset;
     a->a_offset += size;
-    write_op_arg(code, i->i_opcode, arg, size);
+    switch (size) {
+        case 0:
+            break;
+        case 4:
+            *code++ = PACKOPARG(EXTENDED_ARG, (i->i_oparg >> 24) & 0xff);
+            /* fall through */
+        case 3:
+            *code++ = PACKOPARG(EXTENDED_ARG, (i->i_oparg >> 16) & 0xff);
+            /* fall through */
+        case 2:
+            *code++ = PACKOPARG(EXTENDED_ARG, (i->i_oparg >> 8) & 0xff);
+            /* fall through */
+        case 1:
+            *code++ = PACKOPARG(i->i_opcode, i->i_oparg & 0xff);
+            break;
+        default:
+            Py_UNREACHABLE();
+    }
     return 1;
 }
 
@@ -6514,7 +6541,7 @@ assemble_jump_offsets(struct assembler *a, struct compiler *c)
             bsize = b->b_offset;
             for (i = 0; i < b->b_iused; i++) {
                 struct instr *instr = &b->b_instr[i];
-                int isize = instrsize(instr->i_oparg);
+                int isize = instrsize(instr);
                 /* Relative jumps are computed relative to
                    the instruction pointer after fetching
                    the jump instruction.
@@ -6525,7 +6552,7 @@ assemble_jump_offsets(struct assembler *a, struct compiler *c)
                     if (is_relative_jump(instr)) {
                         instr->i_oparg -= bsize;
                     }
-                    if (instrsize(instr->i_oparg) != isize) {
+                    if (instrsize(instr) != isize) {
                         extended_arg_recompile = 1;
                     }
                 }
@@ -6547,6 +6574,28 @@ assemble_jump_offsets(struct assembler *a, struct compiler *c)
         fairly quickly.
     */
     } while (extended_arg_recompile);
+}
+
+static void
+replace_nops_with_zero_width(struct assembler *a) {
+    for (basicblock *bb = a->a_entry; bb != NULL; bb = bb->b_next) {
+        /* Replace if following instruction cannot be target of jump
+          Also, don't allow the very first instruction to be zero-width
+          as that introduces a lot of corner cases for tracing and
+          debugging code. */
+        int first = bb == a->a_entry ? 1 : 0;
+        for (int i = first; i < bb->b_iused-1; i++) {
+            if (bb->b_instr[i].i_opcode == NOP) {
+                bb->b_instr[i].i_opcode = ZERO_WIDTH;
+            }
+        }
+        int last = bb->b_iused-1;
+        if (last >= 0 && bb->b_instr[last].i_opcode == NOP &&
+            !bb->b_nofallthrough && bb->b_next->b_predecessors == 1
+        ) {
+            bb->b_instr[last].i_opcode = ZERO_WIDTH;
+        }
+    }
 }
 
 static PyObject *
@@ -6890,10 +6939,6 @@ assemble(struct compiler *c, int addNone)
                 goto error;
     }
     if (!assemble_line_range(&a)) {
-        return 0;
-    }
-    /* Emit sentinel at end of line number table */
-    if (!assemble_emit_linetable_pair(&a, 255, -128)) {
         goto error;
     }
 
@@ -7267,7 +7312,6 @@ clean_basic_block(basicblock *bb, int prev_lineno) {
                     }
                 }
             }
-
         }
         if (dest != src) {
             bb->b_instr[dest] = bb->b_instr[src];
@@ -7483,6 +7527,7 @@ optimize_cfg(struct compiler *c, struct assembler *a, PyObject *consts)
         eliminate_empty_basic_blocks(a->a_entry);
     }
     propogate_line_numbers(a);
+    replace_nops_with_zero_width(a);
     return 0;
 }
 

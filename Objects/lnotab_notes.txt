@@ -12,7 +12,7 @@ Second, we don't really need arbitrary access to the sequence, so we can store d
 
 We just need to store (end - start, line delta) pairs. The start offset of the first entry is always zero.
 
-Third, most deltas are small, so we can use a single byte for each value, as long we allow several entries for the same line.
+Third, most deltas are small, so we use a variable length encoding.
 
 Consider the following table
      Start    End     Line
@@ -20,8 +20,8 @@ Consider the following table
       6       50      2
       50      350     7
       350     360     No line number
-      360     376     8
-      376     380     208
+      360     376     6
+      376     380     206
 
 Stripping the redundant ends gives:
 
@@ -30,60 +30,78 @@ Stripping the redundant ends gives:
       44        +1
       300       +5
       10        No line number
-      16        +1
+      16        -1
       4         +200
-
 
 Note that the end - start value is always positive.
 
-Finally, in order to fit into a single byte we need to convert start deltas to the range 0 <= delta <= 254,
-and line deltas to the range -127  <= delta <= 127.
-A line delta of -128 is used to indicate no line number.
-A start delta of 255 is used as a sentinel to mark the end of the table.
-Also note that a delta of zero indicates that there are no bytecodes in the given range,
-which means we can use an invalid line number for that range.
+We use a custom variant of the VARINT encoding, to encode the actual values.
+For unused values (the start deltas) we use a big-endian 7 bits per byte encoding
+with the MSB being 1 for all but the last byte.
 
-Final form:
+For signed values, we first convert the value to (abs(value)<<1) | (value < 0)
+Note that differs from the zig-zag encoding used in protocol buffers, as it has a redundant
+encoding of zero. 0 and 1 both decode as 0.
+We take advantage of that to encode None as 1.
 
-   Start delta   Line delta
-    6               +1
-    44              +1
-    254             +5
-    46              0
-    10              -128 (No line number, treated as a delta of zero)
-    16              +1
-    0               +127 (line 135, but the range is empty as no bytecodes are at line 135)
-    4               +73
-    255 (end mark)  ---
+The first few encoded bytes decode as follows (for line deltas):
+   Encoded         Decodes as
+     0                  0
+     1                  None
+     2                  1
+     3                  -1
+     4                  2
+     5                  -2
+
+In addition, we mark the end of the table as 0, None.
+
+Thus, the final form of the above example looks like this:
+
+   Bytes                 Decodes as
+    6 2                  6 +1
+    44 2                 44 +1
+    130 44 10            300 +5
+    10 1                 10 None
+    16 3                 16 -1
+    4 131 16             4  +200
 
 Iterating over the table.
 -------------------------
 
-For the `co_lines` attribute we want to emit the full form, omitting the (350, 360, No line number) and empty entries.
-
 The code is as follows:
+
+def varint_decode_unsigned(table_iter):
+    val = 0
+    for b in table_iter:
+        val << 7
+        val |= (b&127)
+        if not (b&128):
+            return val
+
+def varint_decode_signed(table_iter):
+    uint = varint_decode_unsigned(table_iter)
+    if uint == 1:
+        return None
+    if uint & 1:
+        return -(uint>>1)
+    else:
+        return uint>>1
 
 def co_lines(code):
     line = code.co_firstlineno
     end = 0
     table_iter = iter(code.internal_line_table):
-    for sdelta, ldelta in table_iter:
-        if sdelta == 255:
+    while True:
+        try:
+            sdelta = varint_decode_unsigned(table_iter)
+            ldelta = varint_decode_signed(table_iter)
+        except StopIteration:
             break
-        if ldelta == 0: # No change to line number, just accumulate changes to end
-            end += odelta
-            continue
         start = end
         end = start + sdelta
-        if ldelta == -128: # No valid line number -- skip entry
-            continue
-        line += ldelta
-        if end == start: # Empty range, omit.
-            continue
-        yield start, end, line
-
-
-
+        if ldelta is not None:
+            line += ldelta
+            yield start, end, line
 
 The historical co_lnotab format
 -------------------------------

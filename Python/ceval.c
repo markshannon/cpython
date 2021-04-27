@@ -5572,6 +5572,11 @@ maybe_call_line_trace(Py_tracefunc func, PyObject *obj,
             (line != lastline && frame->f_lasti*2 == trace_info->bounds.ar_start))
         {
             result = call_trace(func, obj, tstate, frame, trace_info, PyTrace_LINE, Py_None);
+            /* Handle zero-width entries */
+            while (trace_info->bounds.ar_end == frame->f_lasti*2 && result == 0) {
+                PyLineTable_NextAddressRange(&trace_info->bounds);
+                result = call_trace(func, obj, tstate, frame, trace_info, PyTrace_LINE, Py_None);
+            }
         }
     }
     /* Always emit an opcode event if we're tracing all opcodes. */

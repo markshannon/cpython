@@ -933,6 +933,15 @@ if 1:
             elif instr.opname in HANDLED_JUMPS:
                 self.assertNotEqual(instr.arg, (line + 1)*INSTR_SIZE)
 
+    def test_nop_removal(self):
+        def func():
+            pass
+            pass
+            pass
+            pass
+            pass
+        self.assertLessEqual(len(func.__code__.co_code), 6)
+
 
 class TestExpressionStackSize(unittest.TestCase):
     # These tests check that the computed stack size for a code object

@@ -1117,20 +1117,63 @@ code_linesiterator(PyCodeObject *code, PyObject *Py_UNUSED(args))
     return (PyObject *)li;
 }
 
+static inline int
+read_varint(unsigned char *p, int offset, int *result)
+{
+    uint8_t b = p[offset++];
+    int val = b&127;
+    while (b&128) {
+        b = p[offset++];
+        val = (val << 7) | (b&127);
+    }
+    *result = val;
+    return offset;
+}
+
+static inline int
+read_varint_backwards(unsigned char *p, int offset, int *result)
+{
+    uint8_t b = p[--offset];
+    int val = b;
+    int shift = 0;
+    assert((b&128) == 0);
+    while (offset > 0 && p[offset-1]&128) {
+        shift += 7;
+        b = p[--offset];
+        val |= (b&127)<<shift;
+    }
+    *result = val;
+    return offset;
+}
+
 static void
 retreat(PyCodeAddressRange *bounds)
 {
-    int ldelta = ((signed char *)bounds->lo_next)[-1];
-    if (ldelta == -128) {
-        ldelta = 0;
-    }
-    bounds->ar_computed_line -= ldelta;
-    bounds->lo_next -= 2;
+    int sdelta, ldelta;
+    bounds->offset = read_varint_backwards(bounds->table, bounds->offset, &ldelta);
+    bounds->offset = read_varint_backwards(bounds->table, bounds->offset, &sdelta);
+    assert(bounds->ar_start + sdelta == bounds->ar_end);
     bounds->ar_end = bounds->ar_start;
-    bounds->ar_start -= ((unsigned char *)bounds->lo_next)[-2];
-    ldelta = ((signed char *)bounds->lo_next)[-1];
-    if (ldelta == -128) {
-        bounds->ar_line = -1;
+    if (ldelta == 1) {
+         bounds->ar_line = -1;
+    }
+    else {
+        if (ldelta & 1) {
+            bounds->ar_computed_line += (ldelta>>1);
+        }
+        else {
+            bounds->ar_computed_line -= (ldelta>>1);
+        }
+    }
+    if (bounds->offset == 0) {
+        return;
+    }
+    assert(bounds->offset > 0);
+    int offset = read_varint_backwards(bounds->table, bounds->offset, &ldelta);
+    read_varint_backwards(bounds->table, offset, &sdelta);
+    bounds->ar_start = bounds->ar_end - sdelta;
+    if (ldelta == 1) {
+         bounds->ar_line = -1;
     }
     else {
         bounds->ar_line = bounds->ar_computed_line;
@@ -1140,37 +1183,37 @@ retreat(PyCodeAddressRange *bounds)
 static void
 advance(PyCodeAddressRange *bounds)
 {
+    int sdelta, ldelta;
+    bounds->offset = read_varint(bounds->table, bounds->offset, &sdelta);
+    bounds->offset = read_varint(bounds->table, bounds->offset, &ldelta);
     bounds->ar_start = bounds->ar_end;
-    int delta = ((unsigned char *)bounds->lo_next)[0];
-    assert (delta < 255);
-    bounds->ar_end += delta;
-    int ldelta = ((signed char *)bounds->lo_next)[1];
-    bounds->lo_next += 2;
-    if (ldelta == -128) {
+    bounds->ar_end += sdelta;
+    if (ldelta == 1) {
         bounds->ar_line = -1;
     }
     else {
-        bounds->ar_computed_line += ldelta;
+        if (ldelta & 1) {
+            bounds->ar_computed_line -= (ldelta>>1);
+        }
+        else {
+            bounds->ar_computed_line += (ldelta>>1);
+        }
         bounds->ar_line = bounds->ar_computed_line;
     }
 }
 
 static inline int
 at_end(PyCodeAddressRange *bounds) {
-    return ((unsigned char *)bounds->lo_next)[0] == 255;
+    return bounds->offset >= bounds->length;
 }
 
 int
 PyLineTable_PreviousAddressRange(PyCodeAddressRange *range)
 {
-    if (range->ar_start <= 0) {
+    if (range->offset <= 0) {
         return 0;
     }
     retreat(range);
-    while (range->ar_start == range->ar_end) {
-        assert(range->ar_start > 0);
-        retreat(range);
-    }
     return 1;
 }
 
@@ -1181,10 +1224,6 @@ PyLineTable_NextAddressRange(PyCodeAddressRange *range)
         return 0;
     }
     advance(range);
-    while (range->ar_start == range->ar_end) {
-        assert(!at_end(range));
-        advance(range);
-    }
     return 1;
 }
 
@@ -1256,9 +1295,11 @@ PyCode_Addr2Line(PyCodeObject *co, int addrq)
 }
 
 void
-PyLineTable_InitAddressRange(char *linetable, int firstlineno, PyCodeAddressRange *range)
+PyLineTable_InitAddressRange(char *linetable, size_t length, int firstlineno, PyCodeAddressRange *range)
 {
-    range->lo_next = linetable;
+    range->table = (unsigned char *)linetable;
+    range->length = length;
+    range->offset = 0;
     range->ar_start = -1;
     range->ar_end = 0;
     range->ar_computed_line = firstlineno;
@@ -1269,28 +1310,65 @@ int
 _PyCode_InitAddressRange(PyCodeObject* co, PyCodeAddressRange *bounds)
 {
     char *linetable = PyBytes_AS_STRING(co->co_linetable);
-    PyLineTable_InitAddressRange(linetable, co->co_firstlineno, bounds);
+    Py_ssize_t length = PyBytes_GET_SIZE(co->co_linetable);
+    PyLineTable_InitAddressRange(linetable, length, co->co_firstlineno, bounds);
     return bounds->ar_line;
 }
 
-/* Update *bounds to describe the first and one-past-the-last instructions in
-   the same line as lasti.  Return the number of that line, or -1 if lasti is out of bounds. */
+static int
+bounds_compare(PyCodeAddressRange *bounds, int lasti)
+{
+    if (bounds->ar_start > lasti) {
+        return 1;
+    }
+    if (bounds->ar_start == lasti) {
+        return 0;
+    }
+    assert(bounds->ar_start < lasti);
+    if (bounds->ar_end > lasti) {
+        return 0;
+    }
+    return -1;
+}
+
+/* Update *bounds to contain lasti.
+ * Return the number of that line, or -1 if lasti is out of bounds. */
 int
 _PyCode_CheckLineNumber(int lasti, PyCodeAddressRange *bounds)
 {
-    while (bounds->ar_end <= lasti) {
-        if (!PyLineTable_NextAddressRange(bounds)) {
+    if (bounds_compare(bounds, lasti) == 0) {
+        return bounds->ar_line;
+    }
+    if (bounds_compare(bounds, lasti) < 0) {
+        do {
+            if (!PyLineTable_NextAddressRange(bounds)) {
+                return -1;
+            }
+        } while (bounds_compare(bounds, lasti) < 0);
+        assert(bounds_compare(bounds, lasti) == 0);
+        return bounds->ar_line;
+    }
+    assert(bounds_compare(bounds, lasti) > 0);
+    do {
+        if (!PyLineTable_PreviousAddressRange(bounds)) {
             return -1;
         }
-    }
-    while (bounds->ar_start > lasti) {
+    } while (bounds_compare(bounds, lasti) > 0);
+    /* Because we need to account for zero-width entries
+     * scan backward until start < lasti, even if we might be in-bounds */
+    while (bounds->offset > 0 && bounds_compare(bounds, lasti) == 0) {
         if (!PyLineTable_PreviousAddressRange(bounds)) {
             return -1;
         }
     }
+    if (bounds_compare(bounds, lasti) < 0) {
+        if (!PyLineTable_NextAddressRange(bounds)) {
+            return -1;
+        }
+    }
+    assert(bounds_compare(bounds, lasti) == 0);
     return bounds->ar_line;
 }
-
 
 int
 _PyCode_GetExtra(PyObject *code, Py_ssize_t index, void **extra)

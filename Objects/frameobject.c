@@ -485,6 +485,7 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
 
     /* Finally set the new f_lasti and return OK. */
     f->f_lineno = 0;
+    printf("Jumping from %d to %d\n", f->f_lasti, best_addr);
     f->f_lasti = best_addr;
     return 0;
 }
