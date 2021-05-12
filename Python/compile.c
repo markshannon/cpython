@@ -23,6 +23,7 @@
 
 #include "Python.h"
 #include "pycore_ast.h"           // _PyAST_GetDocString()
+#include "pycore_code.h"
 #include "pycore_compile.h"       // _PyFuture_FromAST()
 #include "pycore_pymem.h"         // _PyMem_IsPtrFreed()
 #include "pycore_long.h"          // _PyLong_GetZero()
@@ -7182,11 +7183,11 @@ makecode(struct compiler *c, struct assembler *a, PyObject *consts, int maxdepth
     posonlyargcount = Py_SAFE_DOWNCAST(c->u->u_posonlyargcount, Py_ssize_t, int);
     posorkeywordargcount = Py_SAFE_DOWNCAST(c->u->u_argcount, Py_ssize_t, int);
     kwonlyargcount = Py_SAFE_DOWNCAST(c->u->u_kwonlyargcount, Py_ssize_t, int);
-    co = PyCode_NewWithPosOnlyArgs(posonlyargcount+posorkeywordargcount,
-                                   posonlyargcount, kwonlyargcount, nlocals_int,
-                                   maxdepth, flags, a->a_bytecode, consts, names,
-                                   varnames, freevars, cellvars, c->c_filename,
-                                   c->u->u_name, c->u->u_firstlineno, a->a_lnotab, a->a_except_table);
+    co = _PyCode_New(posonlyargcount+posorkeywordargcount,
+                     posonlyargcount, kwonlyargcount, nlocals_int,
+                     maxdepth, flags, a->a_bytecode, consts, names,
+                     varnames, freevars, cellvars, c->c_filename,
+                     c->u->u_name, c->u->u_firstlineno, a->a_lnotab, a->a_except_table);
     Py_DECREF(consts);
  error:
     Py_XDECREF(names);

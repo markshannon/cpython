@@ -3,7 +3,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
- 
+
 typedef struct {
     PyObject *ptr;  /* Cached pointer (borrowed reference) */
     uint64_t globals_ver;  /* ma_version of global dict */
@@ -26,6 +26,13 @@ struct _PyOpcache {
 
 /* Private API */
 int _PyCode_InitOpcache(PyCodeObject *co);
+
+PyCodeObject *_PyCode_New(
+        int, int, int, int, int, int, PyObject *, PyObject *,
+        PyObject *, PyObject *, PyObject *, PyObject *,
+        PyObject *, PyObject *, int, PyObject *, PyObject *);
+        /* same as struct above */
+
 
 
 #ifdef __cplusplus

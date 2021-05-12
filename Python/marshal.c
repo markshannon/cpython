@@ -14,6 +14,8 @@
 #include "marshal.h"
 #include "pycore_hashtable.h"
 
+#include "pycore_code.h" // For _PyCode_New
+
 /*[clinic input]
 module marshal
 [clinic start generated code]*/
@@ -1383,7 +1385,7 @@ r_object(RFILE *p)
                 goto code_error;
             }
 
-            v = (PyObject *) PyCode_NewWithPosOnlyArgs(
+            v = (PyObject *) _PyCode_New(
                             argcount, posonlyargcount, kwonlyargcount,
                             nlocals, stacksize, flags,
                             code, consts, names, varnames,
