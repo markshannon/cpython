@@ -28,7 +28,7 @@ typedef struct _interpreter_frame {
     /* Borrowed reference to a generator, or NULL */
     PyObject *generator;
     struct _interpreter_frame *previous;
-    int f_lasti;       /* Last instruction if called */
+    _Py_CODEUNIT *f_last_instr; /* Last instruction */
     int stacktop;     /* Offset of TOS from localsplus  */
     PyFrameState f_state;  /* What state the frame is in */
     PyObject *localsplus[1];
@@ -66,6 +66,11 @@ static inline void _PyFrame_StackPush(InterpreterFrame *f, PyObject *value) {
     f->stacktop++;
 }
 
+static inline int _PyFrame_GetLasti(InterpreterFrame *f) {
+    Py_ssize_t offset = f->f_last_instr - f->f_code->co_firstinstr;
+    return offset < 0 ? - 1 : ((int)offset) *2;
+}
+
 #define FRAME_SPECIALS_SIZE ((sizeof(InterpreterFrame)-1)/sizeof(PyObject *))
 
 InterpreterFrame *
@@ -77,13 +82,13 @@ _PyFrame_InitializeSpecials(
     PyObject *locals, int nlocalsplus)
 {
     frame->f_code = (PyCodeObject *)Py_NewRef(con->fc_code);
+    frame->f_last_instr = frame->f_code->co_firstinstr - 1;
     frame->f_builtins = Py_NewRef(con->fc_builtins);
     frame->f_globals = Py_NewRef(con->fc_globals);
     frame->f_locals = Py_XNewRef(locals);
     frame->stacktop = nlocalsplus;
     frame->frame_obj = NULL;
     frame->generator = NULL;
-    frame->f_lasti = -1;
     frame->f_state = FRAME_CREATED;
 }
 

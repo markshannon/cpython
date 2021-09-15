@@ -87,7 +87,7 @@ _PyGen_Finalize(PyObject *self)
        issue a RuntimeWarning. */
     if (gen->gi_code != NULL &&
         ((PyCodeObject *)gen->gi_code)->co_flags & CO_COROUTINE &&
-        gen->gi_xframe->f_lasti == -1)
+        _PyFrame_GetLasti(gen->gi_xframe) < 0)
     {
         _PyErr_WarnUnawaitedCoroutine((PyObject *)gen);
     }
@@ -186,7 +186,7 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
     }
 
     assert(_PyFrame_IsRunnable(frame));
-    assert(frame->f_lasti >= 0 || ((unsigned char *)PyBytes_AS_STRING(gen->gi_code->co_code))[0] == GEN_START);
+    assert(_PyFrame_GetLasti(frame) >= 0 || ((unsigned char *)PyBytes_AS_STRING(gen->gi_code->co_code))[0] == GEN_START);
     /* Push arg onto the frame's value stack */
     result = arg ? arg : Py_None;
     Py_INCREF(result);
@@ -339,7 +339,7 @@ _PyGen_yf(PyGenObject *gen)
         PyObject *bytecode = gen->gi_code->co_code;
         unsigned char *code = (unsigned char *)PyBytes_AS_STRING(bytecode);
 
-        if (frame->f_lasti < 0) {
+        if (_PyFrame_GetLasti(frame) < 0) {
             /* Return immediately if the frame didn't start yet. YIELD_FROM
                always come after LOAD_CONST: a code object should not start
                with YIELD_FROM */
@@ -347,7 +347,7 @@ _PyGen_yf(PyGenObject *gen)
             return NULL;
         }
 
-        if (code[(frame->f_lasti+1)*sizeof(_Py_CODEUNIT)] != YIELD_FROM)
+        if (code[_PyFrame_GetLasti(frame)+sizeof(_Py_CODEUNIT)] != YIELD_FROM)
             return NULL;
         yf = _PyFrame_StackPeek(frame);
         Py_INCREF(yf);
@@ -471,8 +471,8 @@ _gen_throw(PyGenObject *gen, int close_on_genexit,
             assert(ret == yf);
             Py_DECREF(ret);
             /* Termination repetition of YIELD_FROM */
-            assert(gen->gi_xframe->f_lasti >= 0);
-            gen->gi_xframe->f_lasti += 1;
+            assert(_PyFrame_GetLasti(gen->gi_xframe) >= 0);
+            gen->gi_xframe->f_last_instr += 1;
             if (_PyGen_FetchStopIterationValue(&val) == 0) {
                 ret = gen_send(gen, val);
                 Py_DECREF(val);
@@ -1284,7 +1284,7 @@ compute_cr_origin(int origin_depth)
         PyCodeObject *code = frame->f_code;
         PyObject *frameinfo = Py_BuildValue("OiO",
                                             code->co_filename,
-                                            PyCode_Addr2Line(frame->f_code, frame->f_lasti*2),
+                                            PyCode_Addr2Line(frame->f_code, _PyFrame_GetLasti(frame)),
                                             code->co_name);
         if (!frameinfo) {
             Py_DECREF(cr_origin);

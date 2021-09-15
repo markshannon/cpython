@@ -45,7 +45,7 @@ PyFrame_GetLineNumber(PyFrameObject *f)
         return f->f_lineno;
     }
     else {
-        return PyCode_Addr2Line(f->f_frame->f_code, f->f_frame->f_lasti*2);
+        return PyCode_Addr2Line(f->f_frame->f_code, _PyFrame_GetLasti(f->f_frame));
     }
 }
 
@@ -64,10 +64,7 @@ frame_getlineno(PyFrameObject *f, void *closure)
 static PyObject *
 frame_getlasti(PyFrameObject *f, void *closure)
 {
-    if (f->f_frame->f_lasti < 0) {
-        return PyLong_FromLong(-1);
-    }
-    return PyLong_FromLong(f->f_frame->f_lasti*2);
+    return PyLong_FromLong(_PyFrame_GetLasti(f->f_frame));
 }
 
 static PyObject *
@@ -511,7 +508,7 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
 
     int64_t best_stack = OVERFLOWED;
     int best_addr = -1;
-    int64_t start_stack = stacks[f->f_frame->f_lasti];
+    int64_t start_stack = stacks[_PyFrame_GetLasti(f->f_frame)/2];
     int err = -1;
     const char *msg = "cannot find bytecode for specified line";
     for (int i = 0; i < len; i++) {
@@ -555,7 +552,8 @@ frame_setlineno(PyFrameObject *f, PyObject* p_new_lineno, void *Py_UNUSED(ignore
     }
     /* Finally set the new lasti and return OK. */
     f->f_lineno = 0;
-    f->f_frame->f_lasti = best_addr;
+
+    f->f_frame->f_last_instr = f->f_frame->f_code->co_firstinstr + best_addr;
     return 0;
 }
 
@@ -882,7 +880,7 @@ _PyFrame_OpAlreadyRan(InterpreterFrame *frame, int opcode, int oparg)
 {
     const _Py_CODEUNIT *code =
         (const _Py_CODEUNIT *)PyBytes_AS_STRING(frame->f_code->co_code);
-    for (int i = 0; i < frame->f_lasti; i++) {
+        for (int i = 0; i < _PyFrame_GetLasti(frame)/2; i++) {
         if (_Py_OPCODE(code[i]) == opcode && _Py_OPARG(code[i]) == oparg) {
             return 1;
         }

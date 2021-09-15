@@ -8880,7 +8880,7 @@ super_init_without_args(PyFrameObject *f, PyCodeObject *co,
     if (firstarg != NULL && (_PyLocals_GetKind(co->co_localspluskinds, 0) & CO_FAST_CELL)) {
         // "firstarg" is a cell here unless (very unlikely) super()
         // was called from the C-API before the first MAKE_CELL op.
-        if (f->f_frame->f_lasti >= 0) {
+        if (_PyFrame_GetLasti(f->f_frame) >= 0) {
             assert(_Py_OPCODE(*co->co_firstinstr) == MAKE_CELL);
             assert(PyCell_Check(firstarg));
             firstarg = PyCell_GET(firstarg);
