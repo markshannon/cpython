@@ -172,6 +172,8 @@ struct _ts {
     PyObject **datastack_limit;
     /* XXX signal handlers should also be here */
 
+    struct _fiberobject *current_fiber;
+
 };
 
 // Alias for backward compatibility with Python 3.8

@@ -115,6 +115,15 @@ struct _interpreter_frame *_PyEval_GetFrame(void);
 
 PyObject *_Py_MakeCoro(PyFunctionObject *func, struct _interpreter_frame *);
 
+
+struct _interpreter_frame *
+_PyEvalFramePushAndInit(PyThreadState *tstate, PyFunctionObject *func,
+                        PyObject *locals, PyObject* const* args,
+                        size_t argcount, PyObject *kwnames);
+
+int
+_PyEvalFrameClearAndPop(PyThreadState *tstate, struct _interpreter_frame *frame);
+
 #ifdef __cplusplus
 }
 #endif

@@ -86,7 +86,7 @@ static void *opcode_targets[256] = {
     &&TARGET_IMPORT_STAR,
     &&TARGET_SETUP_ANNOTATIONS,
     &&TARGET_YIELD_VALUE,
-    &&_unknown_opcode,
+    &&TARGET_YIELD_UP,
     &&_unknown_opcode,
     &&TARGET_POP_EXCEPT,
     &&TARGET_STORE_NAME,

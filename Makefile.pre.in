@@ -437,12 +437,13 @@ OBJECT_OBJS=	\
 		Objects/descrobject.o \
 		Objects/enumobject.o \
 		Objects/exceptions.o \
-		Objects/genericaliasobject.o \
-		Objects/genobject.o \
+		Objects/fiberobject.o \
 		Objects/fileobject.o \
 		Objects/floatobject.o \
 		Objects/frameobject.o \
 		Objects/funcobject.o \
+		Objects/genericaliasobject.o \
+		Objects/genobject.o \
 		Objects/interpreteridobject.o \
 		Objects/iterobject.o \
 		Objects/listobject.o \

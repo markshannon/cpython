@@ -14,6 +14,7 @@
 #include "pycore_call.h"          // _PyObject_FastCallDictTstate()
 #include "pycore_ceval.h"         // _PyEval_SignalAsyncExc()
 #include "pycore_code.h"
+#include "pycore_fiber.h"
 #include "pycore_function.h"
 #include "pycore_initconfig.h"    // _PyStatus_OK()
 #include "pycore_long.h"          // _PyLong_GetZero()
@@ -98,12 +99,7 @@ static int check_except_type_valid(PyThreadState *tstate, PyObject* right);
 static void format_kwargs_error(PyThreadState *, PyObject *func, PyObject *kwargs);
 static void format_awaitable_error(PyThreadState *, PyTypeObject *, int, int);
 static int get_exception_handler(PyCodeObject *, int, int*, int*, int*);
-static InterpreterFrame *
-_PyEvalFramePushAndInit(PyThreadState *tstate, PyFunctionObject *func,
-                        PyObject *locals, PyObject* const* args,
-                        size_t argcount, PyObject *kwnames);
-static int
-_PyEvalFrameClearAndPop(PyThreadState *tstate, InterpreterFrame * frame);
+
 
 #define NAME_ERROR_MSG \
     "name '%.200s' is not defined"
@@ -1620,9 +1616,11 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, InterpreterFrame *frame, int thr
     cframe.previous = prev_cframe;
     tstate->cframe = &cframe;
 
-    assert(frame->depth == 0);
+    //assert(frame->depth == 0);
     /* Push frame */
-    frame->previous = prev_cframe->current_frame;
+    if (frame->depth == 0) {
+        frame->previous = prev_cframe->current_frame;
+    }
     cframe.current_frame = frame;
 
 start_frame:
@@ -2615,7 +2613,6 @@ check_eval_breaker:
 
         TARGET(YIELD_VALUE) {
             retval = POP();
-
             if (co->co_flags & CO_ASYNC_GENERATOR) {
                 PyObject *w = _PyAsyncGenValueWrapperNew(retval);
                 Py_DECREF(retval);
@@ -2628,6 +2625,27 @@ check_eval_breaker:
             frame->f_state = FRAME_SUSPENDED;
             _PyFrame_SetStackPointer(frame, stack_pointer);
             goto exiting;
+        }
+
+        TARGET(YIELD_UP) {
+            assert(STACK_LEVEL() > 0);
+            if (tstate->current_fiber == NULL) {
+                PyErr_SetString(
+                    PyExc_RuntimeError,
+                    "No current fiber");
+                goto error;
+            }
+            /* TO DO.
+             * Check that the entry frame matches */
+            PyObject *retval = POP();
+            frame->f_state = FRAME_SUSPENDED;
+            tstate->current_fiber->suspended_frame = frame;
+            _PyFrame_SetStackPointer(frame, stack_pointer);
+            /* Restore previous cframe. */
+            tstate->cframe = cframe.previous;
+            tstate->cframe->use_tracing = cframe.use_tracing;
+            _Py_LeaveRecursiveCall(tstate);
+            return retval;
         }
 
         TARGET(GEN_START) {
@@ -5725,7 +5743,7 @@ make_coro(PyThreadState *tstate, PyFunctionObject *func,
 }
 
 /* Consumes all the references to the args */
-static InterpreterFrame *
+InterpreterFrame *
 _PyEvalFramePushAndInit(PyThreadState *tstate, PyFunctionObject *func,
                         PyObject *locals, PyObject* const* args,
                         size_t argcount, PyObject *kwnames)
@@ -5761,7 +5779,7 @@ fail:
     return NULL;
 }
 
-static int
+int
 _PyEvalFrameClearAndPop(PyThreadState *tstate, InterpreterFrame * frame)
 {
     --tstate->recursion_remaining;

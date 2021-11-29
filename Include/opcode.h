@@ -45,6 +45,7 @@ extern "C" {
 #define IMPORT_STAR                      84
 #define SETUP_ANNOTATIONS                85
 #define YIELD_VALUE                      86
+#define YIELD_UP                         87
 #define POP_EXCEPT                       89
 #define HAVE_ARGUMENT                    90
 #define STORE_NAME                       90
