@@ -209,6 +209,7 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
     _PyFrame_StackPush(frame, result);
 
     frame->previous = tstate->cframe->current_frame;
+    assert(frame->frame_obj == NULL || frame->frame_obj->f_back == NULL);
 
     gen->gi_exc_state.previous_item = tstate->exc_info;
     tstate->exc_info = &gen->gi_exc_state;
@@ -232,6 +233,9 @@ gen_send_ex2(PyGenObject *gen, PyObject *arg, PyObject **presult,
      * may keep a chain of frames alive or it could create a reference
      * cycle. */
     frame->previous = NULL;
+    if (frame->frame_obj != NULL) {
+        Py_CLEAR(frame->frame_obj->f_back);
+    }
 
     /* If the generator just returned (as opposed to yielding), signal
      * that the generator is exhausted. */
@@ -458,6 +462,7 @@ _gen_throw(PyGenObject *gen, int close_on_genexit,
                somewhere in ceval.c. */
             _PyInterpreterFrame *prev = tstate->cframe->current_frame;
             frame->previous = prev;
+            assert(frame->frame_obj == NULL || frame->frame_obj->f_back == NULL);
             tstate->cframe->current_frame = frame;
             /* Close the generator that we are currently iterating with
                'yield from' or awaiting on with 'await'. */
@@ -468,6 +473,9 @@ _gen_throw(PyGenObject *gen, int close_on_genexit,
             gen->gi_frame_state = state;
             tstate->cframe->current_frame = prev;
             frame->previous = NULL;
+            if (frame->frame_obj != NULL) {
+                Py_CLEAR(frame->frame_obj->f_back);
+            }
         } else {
             /* `yf` is an iterator or a coroutine-like object. */
             PyObject *meth;
