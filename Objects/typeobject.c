@@ -264,36 +264,27 @@ clear_tp_dict(PyTypeObject *self)
     Py_CLEAR(self->tp_dict);
 }
 
-
-static inline PyObject *
-lookup_tp_bases(PyTypeObject *self)
-{
-    if (self->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) {
-        PyInterpreterState *interp = _PyInterpreterState_GET();
-        static_builtin_state *state = _PyStaticType_GetState(interp, self);
-        assert(state != NULL);
-        return state->tp_bases;
-    }
-    return self->tp_bases;
-}
-
 PyObject *
 _PyType_GetBases(PyTypeObject *self)
 {
     /* It returns a borrowed reference. */
-    return lookup_tp_bases(self);
+    return self->tp_bases;
 }
 
 static inline void
 set_tp_bases(PyTypeObject *self, PyObject *bases)
 {
+#ifdef Py_DEBUG
     if (self->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) {
-        PyInterpreterState *interp = _PyInterpreterState_GET();
-        static_builtin_state *state = _PyStaticType_GetState(interp, self);
-        assert(state != NULL);
-        state->tp_bases = bases;
-        return;
+        assert(_Py_IsImmortal(bases));
+        assert(PyTuple_CheckExact(bases));
+        for (intptr_t i = 0; i < PyTuple_GET_SIZE(bases); i++) {
+            PyObject *base = PyTuple_GetItem(bases, i);
+            assert(PyType_Check(base));
+            assert(((PyTypeObject *)base)->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN);
+        }
     }
+#endif
     self->tp_bases = bases;
 }
 
@@ -301,10 +292,6 @@ static inline void
 clear_tp_bases(PyTypeObject *self)
 {
     if (self->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) {
-        PyInterpreterState *interp = _PyInterpreterState_GET();
-        static_builtin_state *state = _PyStaticType_GetState(interp, self);
-        assert(state != NULL);
-        Py_CLEAR(state->tp_bases);
         return;
     }
     Py_CLEAR(self->tp_bases);
@@ -893,7 +880,7 @@ assign_version_tag(PyInterpreterState *interp, PyTypeObject *type)
         assert (type->tp_version_tag != 0);
     }
 
-    PyObject *bases = lookup_tp_bases(type);
+    PyObject *bases = type->tp_bases;
     Py_ssize_t n = PyTuple_GET_SIZE(bases);
     for (Py_ssize_t i = 0; i < n; i++) {
         PyObject *b = PyTuple_GET_ITEM(bases, i);
@@ -1135,7 +1122,7 @@ type_set_abstractmethods(PyTypeObject *type, PyObject *value, void *context)
 static PyObject *
 type_get_bases(PyTypeObject *type, void *context)
 {
-    PyObject *bases = lookup_tp_bases(type);
+    PyObject *bases = type->tp_bases;
     if (bases == NULL) {
         Py_RETURN_NONE;
     }
@@ -1293,7 +1280,7 @@ type_set_bases(PyTypeObject *type, PyObject *new_bases, void *context)
         return -1;
     }
 
-    PyObject *old_bases = lookup_tp_bases(type);
+    PyObject *old_bases = type->tp_bases;
     assert(old_bases != NULL);
     PyTypeObject *old_base = type->tp_base;
 
@@ -1312,7 +1299,7 @@ type_set_bases(PyTypeObject *type, PyObject *new_bases, void *context)
     /* Take no action in case if type->tp_bases has been replaced
        through reentrance.  */
     int res;
-    if (lookup_tp_bases(type) == new_bases) {
+    if (type->tp_bases == new_bases) {
         /* any base that was in __bases__ but now isn't, we
            need to remove |type| from its tp_subclasses.
            conversely, any class now in __bases__ that wasn't
@@ -1351,7 +1338,7 @@ type_set_bases(PyTypeObject *type, PyObject *new_bases, void *context)
     Py_DECREF(temp);
 
   bail:
-    if (lookup_tp_bases(type) == new_bases) {
+    if (type->tp_bases == new_bases) {
         assert(type->tp_base == new_base);
 
         set_tp_bases(type, old_bases);
@@ -2488,7 +2475,7 @@ mro_implementation(PyTypeObject *type)
             return NULL;
     }
 
-    PyObject *bases = lookup_tp_bases(type);
+    PyObject *bases = type->tp_bases;
     Py_ssize_t n = PyTuple_GET_SIZE(bases);
     for (Py_ssize_t i = 0; i < n; i++) {
         PyTypeObject *base = _PyType_CAST(PyTuple_GET_ITEM(bases, i));
@@ -2716,7 +2703,7 @@ mro_internal(PyTypeObject *type, PyObject **p_old_mro)
     type_mro_modified(type, new_mro);
     /* corner case: the super class might have been hidden
        from the custom MRO */
-    type_mro_modified(type, lookup_tp_bases(type));
+    type_mro_modified(type, type->tp_bases);
 
     // XXX Expand this to Py_TPFLAGS_IMMUTABLETYPE?
     if (!(type->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN)) {
@@ -4936,7 +4923,7 @@ _PyDictKeys_DecRef(PyDictKeysObject *keys);
 static void
 type_dealloc_common(PyTypeObject *type)
 {
-    PyObject *bases = lookup_tp_bases(type);
+    PyObject *bases = type->tp_bases;
     if (bases != NULL) {
         PyObject *exc = PyErr_GetRaisedException();
         remove_all_subclasses(type, bases);
@@ -6990,7 +6977,7 @@ type_ready_pre_checks(PyTypeObject *type)
 static int
 type_ready_set_bases(PyTypeObject *type)
 {
-    if (lookup_tp_bases(type) != NULL) {
+    if (type->tp_bases != NULL) {
         return 0;
     }
 
@@ -7029,14 +7016,26 @@ type_ready_set_bases(PyTypeObject *type)
     }
 
     /* Initialize tp_bases */
-    PyObject *bases = lookup_tp_bases(type);
+    PyObject *bases = type->tp_bases;
     if (bases == NULL) {
         PyTypeObject *base = type->tp_base;
         if (base == NULL) {
             bases = PyTuple_New(0);
         }
         else {
-            bases = PyTuple_Pack(1, base);
+            if (type->tp_flags & _Py_TPFLAGS_STATIC_BUILTIN) {
+                assert(_Py_IsImmortal(base));
+                bases = malloc(sizeof(PyTupleObject));
+                if (bases) {
+                    bases->ob_refcnt = _Py_IMMORTAL_REFCNT;
+                    bases->ob_type = &PyTuple_Type;
+                    ((PyTupleObject *)bases)->ob_base.ob_size = 1;
+                    ((PyTupleObject *)bases)->ob_item[0] = (PyObject *)base;
+                }
+            }
+            else {
+                bases = PyTuple_Pack(1, base);
+            }
         }
         if (bases == NULL) {
             return -1;
@@ -7292,7 +7291,7 @@ type_ready_set_hash(PyTypeObject *type)
 static int
 type_ready_add_subclasses(PyTypeObject *type)
 {
-    PyObject *bases = lookup_tp_bases(type);
+    PyObject *bases = type->tp_bases;
     Py_ssize_t nbase = PyTuple_GET_SIZE(bases);
     for (Py_ssize_t i = 0; i < nbase; i++) {
         PyObject *b = PyTuple_GET_ITEM(bases, i);
