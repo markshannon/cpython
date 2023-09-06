@@ -132,11 +132,11 @@ dummy_func(
         inst(NOP, (--)) {
         }
 
-        family(RESUME, 0) = {
+        family(RESUME, INLINE_CACHE_ENTRIES_RESUME) = {
             RESUME_CHECK,
         };
 
-        inst(RESUME, (--)) {
+        inst(RESUME, (unused/1 --)) {
             TIER_ONE_ONLY
             assert(frame == tstate->current_frame);
             if (_PyFrame_GetCode(frame)->_co_instrumentation_version != tstate->interp->monitoring_version) {
@@ -152,7 +152,7 @@ dummy_func(
             }
         }
 
-        inst(RESUME_CHECK, (--)) {
+        inst(RESUME_CHECK, (unused/1 --)) {
 #if defined(__EMSCRIPTEN__)
             DEOPT_IF(emscripten_signal_clock == 0, RESUME);
             emscripten_signal_clock -= Py_EMSCRIPTEN_SIGNAL_HANDLING;
@@ -161,9 +161,24 @@ dummy_func(
             DEOPT_IF(_PyFrame_GetCode(frame)->_co_instrumentation_version
                 != tstate->interp->monitoring_version, RESUME);
             DEOPT_IF(_Py_atomic_load_relaxed_int32(&tstate->interp->ceval.eval_breaker), RESUME);
+            #if ENABLE_SPECIALIZATION
+            _Py_CODEUNIT *here = next_instr - 1;
+            here[1].cache += (1 << OPTIMIZER_BITS_IN_COUNTER);
+            if (here[1].cache > tstate->interp->optimizer_resume_threshold) {
+                OBJECT_STAT_INC(optimization_attempts);
+                frame = _PyOptimizer_Resume(frame, here, stack_pointer);
+                if (frame == NULL) {
+                    frame = tstate->current_frame;
+                    goto resume_with_error;
+                }
+                assert(frame == tstate->current_frame);
+                here[1].cache &= ((1 << OPTIMIZER_BITS_IN_COUNTER) -1);
+                goto resume_frame;
+            }
+            #endif
         }
 
-        inst(INSTRUMENTED_RESUME, (--)) {
+        inst(INSTRUMENTED_RESUME, (unused/1 --)) {
             /* Possible performance enhancement:
              *   We need to check the eval breaker anyway, can we
              * combine the instrument verison check and the eval breaker test?
