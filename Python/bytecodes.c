@@ -460,6 +460,44 @@ dummy_func(
             DECREF_INPUTS_AND_REUSE_FLOAT(left, right, dres, res);
         }
 
+        op(_MULTIPLY_UNBOXED_FLOAT, (left, right -- res)) {
+            union u { PyObject *o; double d; };
+            union u uleft, uright, ures;
+            uleft.o = left;
+            uright.o = right;
+            ures.d = uleft.d * uright.d;
+            res = ures.o;
+        }
+
+        op(_ADD_UNBOXED_FLOAT, (left, right -- res)) {
+            union u { PyObject *o; double d; };
+            union u uleft, uright, ures;
+            uleft.o = left;
+            uright.o = right;
+            ures.d = uleft.d + uright.d;
+            res = ures.o;
+        }
+
+        op(_BOX_FLOAT, (value -- res)) {
+            union u { PyObject *o; double d; };
+            union u uvalue;
+            uvalue.o = value;
+            res = PyFloat_FromDouble(uvalue.d);
+            ERROR_IF(res == NULL, error);
+        }
+
+        op(_UNBOX_FLOAT, (value -- res)) {
+            union u { PyObject *o; double d; };
+            union u ures;
+            ures.d = ((PyFloatObject *)value)->ob_fval;
+            Py_DECREF(value);
+            res = ures.o;
+        }
+
+        op(_LOAD_UNBOXED_FLOAT_CONST, (value/4 -- res)) {
+            res = value;
+        }
+
         op(_BINARY_OP_ADD_FLOAT, (left, right -- res)) {
             STAT_INC(BINARY_OP, hit);
             double dres =

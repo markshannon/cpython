@@ -317,6 +317,75 @@
             break;
         }
 
+        case _MULTIPLY_UNBOXED_FLOAT: {
+            PyObject *right;
+            PyObject *left;
+            PyObject *res;
+            right = stack_pointer[-1];
+            left = stack_pointer[-2];
+            union u { PyObject *o; double d; };
+            union u uleft, uright, ures;
+            uleft.o = left;
+            uright.o = right;
+            ures.d = uleft.d * uright.d;
+            res = ures.o;
+            stack_pointer[-2] = res;
+            stack_pointer += -1;
+            break;
+        }
+
+        case _ADD_UNBOXED_FLOAT: {
+            PyObject *right;
+            PyObject *left;
+            PyObject *res;
+            right = stack_pointer[-1];
+            left = stack_pointer[-2];
+            union u { PyObject *o; double d; };
+            union u uleft, uright, ures;
+            uleft.o = left;
+            uright.o = right;
+            ures.d = uleft.d + uright.d;
+            res = ures.o;
+            stack_pointer[-2] = res;
+            stack_pointer += -1;
+            break;
+        }
+
+        case _BOX_FLOAT: {
+            PyObject *value;
+            PyObject *res;
+            value = stack_pointer[-1];
+            union u { PyObject *o; double d; };
+            union u uvalue;
+            uvalue.o = value;
+            res = PyFloat_FromDouble(uvalue.d);
+            if (res == NULL) goto pop_1_error_tier_two;
+            stack_pointer[-1] = res;
+            break;
+        }
+
+        case _UNBOX_FLOAT: {
+            PyObject *value;
+            PyObject *res;
+            value = stack_pointer[-1];
+            union u { PyObject *o; double d; };
+            union u ures;
+            ures.d = ((PyFloatObject *)value)->ob_fval;
+            Py_DECREF(value);
+            res = ures.o;
+            stack_pointer[-1] = res;
+            break;
+        }
+
+        case _LOAD_UNBOXED_FLOAT: {
+            PyObject *res;
+            PyObject *value = (PyObject *)CURRENT_OPERAND();
+            res = value;
+            stack_pointer[0] = res;
+            stack_pointer += 1;
+            break;
+        }
+
         case _BINARY_OP_ADD_FLOAT: {
             PyObject *right;
             PyObject *left;
