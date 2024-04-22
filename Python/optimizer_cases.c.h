@@ -684,6 +684,14 @@
 
         /* _INSTRUMENTED_YIELD_VALUE is not a viable micro-op for tier 2 */
 
+        case _YIELD_VALUE: {
+            _Py_UopsSymbol *value;
+            value = sym_new_not_null(ctx);
+            if (value == NULL) goto out_of_space;
+            stack_pointer[-1] = value;
+            break;
+        }
+
         case _POP_EXCEPT: {
             stack_pointer += -1;
             break;

@@ -1115,6 +1115,39 @@
 
         /* _INSTRUMENTED_YIELD_VALUE is not a viable micro-op for tier 2 because it is instrumented */
 
+        case _YIELD_VALUE: {
+            PyObject *retval;
+            PyObject *value;
+            oparg = CURRENT_OPARG();
+            retval = stack_pointer[-1];
+            // NOTE: It's important that YIELD_VALUE never raises an exception!
+            // The compiler treats any exception raised here as a failed close()
+            // or throw() call.
+            assert(frame != &entry_frame);
+            frame->instr_ptr++;
+            PyGenObject *gen = _PyFrame_GetGenerator(frame);
+            assert(FRAME_SUSPENDED_YIELD_FROM == FRAME_SUSPENDED + 1);
+            assert(oparg == 0 || oparg == 1);
+            gen->gi_frame_state = FRAME_SUSPENDED + oparg;
+            stack_pointer += -1;
+            _PyFrame_SetStackPointer(frame, stack_pointer);
+            tstate->exc_info = gen->gi_exc_state.previous_item;
+            gen->gi_exc_state.previous_item = NULL;
+            _Py_LeaveRecursiveCallPy(tstate);
+            _PyInterpreterFrame *gen_frame = frame;
+            frame = tstate->current_frame = frame->previous;
+            gen_frame->previous = NULL;
+            /* We don't know which of these is relevant here, so keep them equal */
+            assert(INLINE_CACHE_ENTRIES_SEND == INLINE_CACHE_ENTRIES_FOR_ITER);
+            LOAD_IP(1 + INLINE_CACHE_ENTRIES_SEND);
+            LOAD_SP();
+            value = retval;
+            LLTRACE_RESUME_FRAME();
+            stack_pointer[0] = value;
+            stack_pointer += 1;
+            break;
+        }
+
         case _POP_EXCEPT: {
             PyObject *exc_value;
             exc_value = stack_pointer[-1];
@@ -3213,12 +3246,7 @@
             tstate->py_recursion_remaining--;
             LOAD_SP();
             LOAD_IP(0);
-            #if LLTRACE && TIER_ONE
-            lltrace = maybe_lltrace_resume_frame(frame, &entry_frame, GLOBALS());
-            if (lltrace < 0) {
-                goto exit_unwind;
-            }
-            #endif
+            LLTRACE_RESUME_FRAME();
             break;
         }
 

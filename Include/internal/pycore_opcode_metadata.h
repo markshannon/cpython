@@ -1345,6 +1345,7 @@ _PyOpcode_macro_expansion[256] = {
     [UNPACK_SEQUENCE_TUPLE] = { .nuops = 1, .uops = { { _UNPACK_SEQUENCE_TUPLE, 0, 0 } } },
     [UNPACK_SEQUENCE_TWO_TUPLE] = { .nuops = 1, .uops = { { _UNPACK_SEQUENCE_TWO_TUPLE, 0, 0 } } },
     [WITH_EXCEPT_START] = { .nuops = 1, .uops = { { _WITH_EXCEPT_START, 0, 0 } } },
+    [YIELD_VALUE] = { .nuops = 1, .uops = { { _YIELD_VALUE, 0, 0 } } },
 };
 #endif // NEED_OPCODE_METADATA
 
