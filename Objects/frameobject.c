@@ -925,9 +925,13 @@ frame_getlasti(PyFrameObject *f, void *closure)
 static PyObject *
 frame_getglobals(PyFrameObject *f, void *closure)
 {
-    PyObject *globals = f->f_frame->f_globals;
+    PyObject *func = PyStackRef_AsPyObjectBorrow(f->f_frame->f_funcobj);
+    if (!PyFunction_Check(func)) {
+        return Py_None;
+    }
+    PyObject *globals = ((PyFunctionObject *)func)->func_globals;
     if (globals == NULL) {
-        globals = Py_None;
+        return Py_None;
     }
     return Py_NewRef(globals);
 }
@@ -935,9 +939,13 @@ frame_getglobals(PyFrameObject *f, void *closure)
 static PyObject *
 frame_getbuiltins(PyFrameObject *f, void *closure)
 {
-    PyObject *builtins = f->f_frame->f_builtins;
+    PyObject *func = PyStackRef_AsPyObjectBorrow(f->f_frame->f_funcobj);
+    if (!PyFunction_Check(func)) {
+        return Py_None;
+    }
+    PyObject *builtins = ((PyFunctionObject *)func)->func_builtins;
     if (builtins == NULL) {
-        builtins = Py_None;
+        return Py_None;
     }
     return Py_NewRef(builtins);
 }

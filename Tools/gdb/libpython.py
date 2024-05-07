@@ -721,6 +721,12 @@ class PyCodeObjectPtr(PyObjectPtr):
                 return line
         assert False, "Unreachable"
 
+class PyFunctionObjectPtr(PyObjectPtr):
+    """
+    Class wrapping a gdb.Value that's a PyCodeObject* i.e. a <code> instance
+    within the process being debugged.
+    """
+    _typename = 'PyFunctionObject'
 
 def items_from_keys_and_values(keys, values):
     entries, nentries = PyDictObjectPtr._get_entries(keys)
@@ -1068,10 +1074,12 @@ class PyFramePtr:
         return convert(self._gdbval[name])
 
     def _f_globals(self):
-        return self._f_special("f_globals")
+        func = self._f_special("f_funcobj", PyFunctionObjectPtr.from_pyobject_ptr)
+        return PyObjectPtr.from_pyobject_ptr(func.field("func_globals"))
 
     def _f_builtins(self):
-        return self._f_special("f_builtins")
+        func = self._f_special("f_funcobj", PyFunctionObjectPtr.from_pyobject_ptr)
+        return PyObjectPtr.from_pyobject_ptr(func.field("func_builtins"))
 
     def _f_code(self):
         return self._f_special("f_executable", PyCodeObjectPtr.from_pyobject_ptr)
