@@ -995,6 +995,32 @@
             break;
         }
 
+        case _RETURN_VALUE_2: {
+            PyObject *val1;
+            PyObject *val0;
+            PyObject *res0;
+            PyObject *res1;
+            val1 = stack_pointer[-1];
+            val0 = stack_pointer[-2];
+            stack_pointer += -2;
+            _PyFrame_SetStackPointer(frame, stack_pointer);
+            assert(EMPTY());
+            _Py_LeaveRecursiveCallPy(tstate);
+            // GH-99729: We need to unlink the frame *before* clearing it:
+            _PyInterpreterFrame *dying = frame;
+            frame = tstate->current_frame = dying->previous;
+            _PyEval_FrameClearAndPop(tstate, dying);
+            res0 = val0;
+            res1 = val1;
+            LOAD_SP();
+            LOAD_IP(frame->return_offset);
+            LLTRACE_RESUME_FRAME();
+            stack_pointer[0] = res0;
+            stack_pointer[1] = res1;
+            stack_pointer += 2;
+            break;
+        }
+
         /* _INSTRUMENTED_RETURN_VALUE is not a viable micro-op for tier 2 because it is instrumented */
 
         /* _INSTRUMENTED_RETURN_CONST is not a viable micro-op for tier 2 because it is instrumented */

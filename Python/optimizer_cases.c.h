@@ -584,6 +584,16 @@
             break;
         }
 
+        case _RETURN_VALUE_2: {
+            _Py_UopsSymbol *res0;
+            _Py_UopsSymbol *res1;
+            res0 = sym_new_not_null(ctx);
+            res1 = sym_new_not_null(ctx);
+            stack_pointer[-2] = res0;
+            stack_pointer[-1] = res1;
+            break;
+        }
+
         /* _INSTRUMENTED_RETURN_VALUE is not a viable micro-op for tier 2 */
 
         /* _INSTRUMENTED_RETURN_CONST is not a viable micro-op for tier 2 */

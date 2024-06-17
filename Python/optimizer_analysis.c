@@ -389,7 +389,7 @@ get_code(_PyUOpInstruction *op)
     return co;
 }
 
-/* 1 for success, 0 for not ready, cannot error at the moment. */
+/* Return trace legnth for success, 0 for not ready, cannot error at the moment. */
 static int
 optimize_uops(
     PyCodeObject *co,
@@ -489,6 +489,42 @@ error:
 
 }
 
+/* Return trace legnth for success, 0 for not ready, -1 for error. */
+static int
+partial_evaluation(
+    PyCodeObject *co,
+    _PyUOpInstruction *trace,
+    int trace_len,
+    int curr_stacklen
+)
+{
+    if (trace_len < 2) {
+        return trace_len;
+    }
+    printf("\nPartial evaluation\n");
+    for (int i = 0; i < trace_len-2; i++) {
+        int oparg = trace[i].oparg;
+        if (trace[i].opcode != _BUILD_TUPLE || oparg != 2) {
+            continue;
+        }
+        if (trace[i+1].opcode != _RETURN_VALUE) {
+            continue;
+        }
+        switch (trace[i+2].opcode) {
+            case _UNPACK_SEQUENCE:
+                if (trace[i+2].oparg != oparg) {
+                    break;
+                }
+                /* fallthrough */
+            case _UNPACK_SEQUENCE_TWO_TUPLE:
+                trace[i].opcode = _NOP;
+                trace[i+1].opcode = _RETURN_VALUE_2;
+                trace[i+2].opcode = _NOP;
+                i += 2;
+        }
+    }
+    return trace_len;
+}
 
 static int
 remove_unneeded_uops(_PyUOpInstruction *buffer, int buffer_size)
@@ -596,7 +632,13 @@ _Py_uop_analyze_and_optimize(
     length = optimize_uops(
         _PyFrame_GetCode(frame), buffer,
         length, curr_stacklen, dependencies);
+    if (length <= 0) {
+        return length;
+    }
 
+    length = partial_evaluation(
+        _PyFrame_GetCode(frame), buffer,
+        length, curr_stacklen);
     if (length <= 0) {
         return length;
     }

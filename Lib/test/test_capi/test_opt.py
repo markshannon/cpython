@@ -583,6 +583,29 @@ class TestUops(unittest.TestCase):
         count = ops.count("_GUARD_IS_TRUE_POP") + ops.count("_GUARD_IS_FALSE_POP")
         self.assertLessEqual(count, 2)
 
+    def test_eliminate_temporary_tuple(self):
+        def return_tuple2(a, b):
+            return a, b
+
+        def testfunc(n):
+            total = 0
+            a, b = 1, 2
+            for _ in range(n):
+                a, b = return_tuple2(a, b)
+                total += a + b
+            return total
+
+        opt = _testinternalcapi.new_uop_optimizer()
+        with temporary_optimizer(opt):
+            x = testfunc(20)
+
+        self.assertEqual(x, 60)
+        ex = get_first_executor(testfunc)
+        self.assertIsNotNone(ex)
+        uops = get_opnames(ex)
+        print(uops)
+
+
 
 @requires_specialization
 @unittest.skipUnless(hasattr(_testinternalcapi, "get_optimizer"),
@@ -1024,7 +1047,7 @@ class TestUopsOptimization(unittest.TestCase):
         uops_and_operands = [(opcode, operand) for opcode, _, _, operand in ex]
         uop_names = [uop[0] for uop in uops_and_operands]
         self.assertEqual(uop_names.count("_PUSH_FRAME"), 2)
-        self.assertEqual(uop_names.count("_POP_FRAME"), 2)
+        self.assertEqual(uop_names.count("_RETURN_VALUE"), 2)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE"), 0)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE_OPERAND"), 1)
         # sequential calls: max(12, 13) == 13
@@ -1051,7 +1074,7 @@ class TestUopsOptimization(unittest.TestCase):
         uops_and_operands = [(opcode, operand) for opcode, _, _, operand in ex]
         uop_names = [uop[0] for uop in uops_and_operands]
         self.assertEqual(uop_names.count("_PUSH_FRAME"), 2)
-        self.assertEqual(uop_names.count("_POP_FRAME"), 2)
+        self.assertEqual(uop_names.count("_RETURN_VALUE"), 2)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE"), 0)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE_OPERAND"), 1)
         # nested calls: 15 + 12 == 27
@@ -1086,7 +1109,7 @@ class TestUopsOptimization(unittest.TestCase):
         uops_and_operands = [(opcode, operand) for opcode, _, _, operand in ex]
         uop_names = [uop[0] for uop in uops_and_operands]
         self.assertEqual(uop_names.count("_PUSH_FRAME"), 4)
-        self.assertEqual(uop_names.count("_POP_FRAME"), 4)
+        self.assertEqual(uop_names.count("_RETURN_VALUE"), 4)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE"), 0)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE_OPERAND"), 1)
         # max(12, 18 + max(12, 13)) == 31
@@ -1122,7 +1145,7 @@ class TestUopsOptimization(unittest.TestCase):
         uops_and_operands = [(opcode, operand) for opcode, _, _, operand in ex]
         uop_names = [uop[0] for uop in uops_and_operands]
         self.assertEqual(uop_names.count("_PUSH_FRAME"), 4)
-        self.assertEqual(uop_names.count("_POP_FRAME"), 4)
+        self.assertEqual(uop_names.count("_RETURN_VALUE"), 4)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE"), 0)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE_OPERAND"), 1)
         # max(18 + max(12, 13), 12) == 31
@@ -1166,7 +1189,7 @@ class TestUopsOptimization(unittest.TestCase):
         uops_and_operands = [(opcode, operand) for opcode, _, _, operand in ex]
         uop_names = [uop[0] for uop in uops_and_operands]
         self.assertEqual(uop_names.count("_PUSH_FRAME"), 15)
-        self.assertEqual(uop_names.count("_POP_FRAME"), 15)
+        self.assertEqual(uop_names.count("_RETURN_VALUE"), 15)
 
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE"), 0)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE_OPERAND"), 1)
@@ -1260,7 +1283,7 @@ class TestUopsOptimization(unittest.TestCase):
         uops_and_operands = [(opcode, operand) for opcode, _, _, operand in ex]
         uop_names = [uop[0] for uop in uops_and_operands]
         self.assertEqual(uop_names.count("_PUSH_FRAME"), 2)
-        self.assertEqual(uop_names.count("_POP_FRAME"), 0)
+        self.assertEqual(uop_names.count("_RETURN_VALUE"), 0)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE"), 1)
         self.assertEqual(uop_names.count("_CHECK_STACK_SPACE_OPERAND"), 1)
         largest_stack = _testinternalcapi.get_co_framesize(dummy15.__code__)
