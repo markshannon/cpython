@@ -662,7 +662,15 @@ init_interpreter(PyInterpreterState *interp,
         /* Fix the self-referential, statically initialized fields. */
         interp->dtoa = (struct _dtoa_state)_dtoa_state_INIT(interp);
     }
-
+#ifdef Py_DEBUG
+    // lltrace can be controlled by environment variable
+    {
+        char *python_lltrace = Py_GETENV("PYTHON_LLTRACE");
+        if (python_lltrace != NULL) {
+            interp->lltrace = atoi(python_lltrace);
+        }
+    }
+#endif
     interp->_initialized = 1;
     return _PyStatus_OK();
 }

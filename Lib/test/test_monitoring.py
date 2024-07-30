@@ -249,6 +249,7 @@ class MonitoringEventsBase(MonitoringTestBase):
         except:
             pass
         sys.monitoring.set_events(TEST_TOOL, 0)
+
         #Remove the final event, the call to `sys.monitoring.set_events`
         events = events[:-1]
         return events
@@ -731,9 +732,11 @@ class CheckEvents(MonitoringTestBase, unittest.TestCase):
                 ev = recorder.event_type
                 sys.monitoring.register_callback(tool, ev, recorder(event_list))
                 all_events |= ev
+            sys._set_lltrace(5)
             sys.monitoring.set_events(tool, all_events)
             func()
             sys.monitoring.set_events(tool, 0)
+            sys._set_lltrace(0)
             for recorder in recorders:
                 sys.monitoring.register_callback(tool, recorder.event_type, None)
             return event_list

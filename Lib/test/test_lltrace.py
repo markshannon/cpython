@@ -18,6 +18,8 @@ def example():
 @unittest.skipUnless(support.Py_DEBUG, "lltrace requires Py_DEBUG")
 class TestLLTrace(unittest.TestCase):
 
+    maxDiff = None
+
     def run_code(self, code):
         code = textwrap.dedent(code).strip()
         with open(os_helper.TESTFN, 'w', encoding='utf-8') as fd:
@@ -37,6 +39,7 @@ class TestLLTrace(unittest.TestCase):
 
     def test_lltrace(self):
         stdout = self.run_code("""
+            import sys
             def dont_trace_1():
                 a = "a"
                 a = 10 * a
@@ -47,9 +50,9 @@ class TestLLTrace(unittest.TestCase):
                 x = 42
                 y = -x
             dont_trace_1()
-            __lltrace__ = 1
+            sys._set_lltrace(5)
             trace_me()
-            del __lltrace__
+            sys._set_lltrace(0)
             dont_trace_2()
         """)
         self.assertIn("GET_ITER", stdout)
@@ -63,33 +66,6 @@ class TestLLTrace(unittest.TestCase):
         self.assertNotIn("dont_trace_1", stdout)
         self.assertNotIn("'dont_trace_2' in module", stdout)
 
-    def test_lltrace_different_module(self):
-        stdout = self.run_code("""
-            from test import test_lltrace
-            test_lltrace.__lltrace__ = 1
-            test_lltrace.example()
-        """)
-        self.assertIn("'example' in module 'test.test_lltrace'", stdout)
-        self.assertIn('LOAD_CONST', stdout)
-        self.assertIn('FOR_ITER', stdout)
-        self.assertIn('this is an example', stdout)
-
-        # check that offsets match the output of dis.dis()
-        instr_map = {i.offset: i for i in dis.get_instructions(example, adaptive=True)}
-        for line in stdout.splitlines():
-            offset, colon, opname_oparg = line.partition(":")
-            if not colon:
-                continue
-            offset = int(offset)
-            opname_oparg = opname_oparg.split()
-            if len(opname_oparg) == 2:
-                opname, oparg = opname_oparg
-                oparg = int(oparg)
-            else:
-                (opname,) = opname_oparg
-                oparg = None
-            self.assertEqual(instr_map[offset].opname, opname)
-            self.assertEqual(instr_map[offset].arg, oparg)
 
     def test_lltrace_does_not_crash_on_subscript_operator(self):
         # If this test fails, it will reproduce a crash reported as
@@ -100,9 +76,11 @@ class TestLLTrace(unittest.TestCase):
             import code
 
             console = code.InteractiveConsole()
-            console.push('__lltrace__ = 1')
+            console.push('import sys')
+            console.push('sys._set_lltrace(5)')
             console.push('a = [1, 2, 3]')
             console.push('a[0] = 1')
+            console.push('sys._set_lltrace(0)')
             print('unreachable if bug exists')
         """)
         self.assertIn("unreachable if bug exists", stdout)

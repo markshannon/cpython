@@ -3165,6 +3165,7 @@
             _PyStackRef iter;
             _PyStackRef next;
             iter = stack_pointer[-1];
+            uint32_t instr_offset = (uint32_t)CURRENT_OPERAND();
             /* before: [iter]; after: [iter, iter()] *or* [] (and jump over END_FOR.) */
             PyObject *iter_o = PyStackRef_AsPyObjectBorrow(iter);
             PyObject *next_o = (*Py_TYPE(iter_o)->tp_iternext)(iter_o);
@@ -3173,6 +3174,7 @@
                     if (!_PyErr_ExceptionMatches(tstate, PyExc_StopIteration)) {
                         JUMP_TO_ERROR();
                     }
+                    monitor_raise(tstate, frame, frame->instr_offset);
                     _PyErr_Clear(tstate);
                 }
                 /* iterator ended normally */
@@ -5050,7 +5052,7 @@
             _Py_CODEUNIT *target = _PyCode_CODE(code) + exit->target;
             #if defined(Py_DEBUG) && !defined(_Py_JIT)
             OPT_HIST(trace_uop_execution_counter, trace_run_length_hist);
-            if (lltrace >= 2) {
+            if (tstate->interp->lltrace >= 2) {
                 printf("SIDE EXIT: [UOp ");
                 _PyUOpPrint(&next_uop[-1]);
                 printf(", exit %u, temp %d, target %d -> %s]\n",
@@ -5188,7 +5190,7 @@
             _Py_CODEUNIT *target = frame->instr_ptr;
             #if defined(Py_DEBUG) && !defined(_Py_JIT)
             OPT_HIST(trace_uop_execution_counter, trace_run_length_hist);
-            if (lltrace >= 2) {
+            if (tstate->interp->lltrace >= 2) {
                 printf("DYNAMIC EXIT: [UOp ");
                 _PyUOpPrint(&next_uop[-1]);
                 printf(", exit %u, temp %d, target %d -> %s]\n",

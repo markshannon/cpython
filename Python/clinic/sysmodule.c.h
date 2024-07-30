@@ -1331,6 +1331,68 @@ exit:
 
 #endif /* defined(Py_STATS) */
 
+#if defined(Py_DEBUG)
+
+PyDoc_STRVAR(sys__set_lltrace__doc__,
+"_set_lltrace($module, /, level)\n"
+"--\n"
+"\n"
+"Turns on stats gathering (stats gathering is off by default).");
+
+#define SYS__SET_LLTRACE_METHODDEF    \
+    {"_set_lltrace", _PyCFunction_CAST(sys__set_lltrace), METH_FASTCALL|METH_KEYWORDS, sys__set_lltrace__doc__},
+
+static PyObject *
+sys__set_lltrace_impl(PyObject *module, int level);
+
+static PyObject *
+sys__set_lltrace(PyObject *module, PyObject *const *args, Py_ssize_t nargs, PyObject *kwnames)
+{
+    PyObject *return_value = NULL;
+    #if defined(Py_BUILD_CORE) && !defined(Py_BUILD_CORE_MODULE)
+
+    #define NUM_KEYWORDS 1
+    static struct {
+        PyGC_Head _this_is_not_used;
+        PyObject_VAR_HEAD
+        PyObject *ob_item[NUM_KEYWORDS];
+    } _kwtuple = {
+        .ob_base = PyVarObject_HEAD_INIT(&PyTuple_Type, NUM_KEYWORDS)
+        .ob_item = { &_Py_ID(level), },
+    };
+    #undef NUM_KEYWORDS
+    #define KWTUPLE (&_kwtuple.ob_base.ob_base)
+
+    #else  // !Py_BUILD_CORE
+    #  define KWTUPLE NULL
+    #endif  // !Py_BUILD_CORE
+
+    static const char * const _keywords[] = {"level", NULL};
+    static _PyArg_Parser _parser = {
+        .keywords = _keywords,
+        .fname = "_set_lltrace",
+        .kwtuple = KWTUPLE,
+    };
+    #undef KWTUPLE
+    PyObject *argsbuf[1];
+    int level;
+
+    args = _PyArg_UnpackKeywords(args, nargs, NULL, kwnames, &_parser, 1, 1, 0, argsbuf);
+    if (!args) {
+        goto exit;
+    }
+    level = PyLong_AsInt(args[0]);
+    if (level == -1 && PyErr_Occurred()) {
+        goto exit;
+    }
+    return_value = sys__set_lltrace_impl(module, level);
+
+exit:
+    return return_value;
+}
+
+#endif /* defined(Py_DEBUG) */
+
 #if defined(ANDROID_API_LEVEL)
 
 PyDoc_STRVAR(sys_getandroidapilevel__doc__,
@@ -1611,7 +1673,11 @@ exit:
     #define SYS__STATS_DUMP_METHODDEF
 #endif /* !defined(SYS__STATS_DUMP_METHODDEF) */
 
+#ifndef SYS__SET_LLTRACE_METHODDEF
+    #define SYS__SET_LLTRACE_METHODDEF
+#endif /* !defined(SYS__SET_LLTRACE_METHODDEF) */
+
 #ifndef SYS_GETANDROIDAPILEVEL_METHODDEF
     #define SYS_GETANDROIDAPILEVEL_METHODDEF
 #endif /* !defined(SYS_GETANDROIDAPILEVEL_METHODDEF) */
-/*[clinic end generated code: output=9cc9069aef1482bc input=a9049054013a1b77]*/
+/*[clinic end generated code: output=a161dff62fc48cee input=a9049054013a1b77]*/

@@ -2263,6 +2263,25 @@ sys__stats_dump_impl(PyObject *module)
 #endif   // Py_STATS
 
 
+#ifdef Py_DEBUG
+/*[clinic input]
+sys._set_lltrace
+
+    level: int
+
+Turns on stats gathering (stats gathering is off by default).
+[clinic start generated code]*/
+
+static PyObject *
+sys__set_lltrace_impl(PyObject *module, int level)
+/*[clinic end generated code: output=8dc4210f1279a052 input=2d7990fe3f3af56d]*/
+{
+    _PyInterpreterState_GET()->lltrace = level;
+    Py_RETURN_NONE;
+}
+
+#endif // Py_DEBUG
+
 #ifdef ANDROID_API_LEVEL
 /*[clinic input]
 sys.getandroidapilevel
@@ -2619,8 +2638,15 @@ static PyMethodDef sys_methods[] = {
     SYS__STATS_CLEAR_METHODDEF
     SYS__STATS_DUMP_METHODDEF
 #endif
+#ifdef Py_DEBUG
+    SYS__SET_LLTRACE_METHODDEF
+#endif
     SYS__GET_CPU_COUNT_CONFIG_METHODDEF
     SYS__IS_GIL_ENABLED_METHODDEF
+#ifdef Py_DEBUG
+
+
+#endif
     {NULL, NULL}  // sentinel
 };
 

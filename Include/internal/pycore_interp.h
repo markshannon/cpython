@@ -275,6 +275,9 @@ struct _is {
     /* the initial PyInterpreterState.threads.head */
     _PyThreadStateImpl _initial_thread;
     Py_ssize_t _interactive_src_count;
+
+    /* __lltrace__ support. Only used in debug builds */
+    int lltrace;
 };
 
 

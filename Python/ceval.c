@@ -196,31 +196,15 @@ lltrace_resume_frame(_PyInterpreterFrame *frame)
     PyErr_SetRaisedException(exc);
 }
 
-static int
-maybe_lltrace_resume_frame(_PyInterpreterFrame *frame, _PyInterpreterFrame *skip_frame, PyObject *globals)
+static void
+maybe_lltrace_resume_frame(_PyInterpreterFrame *frame, _PyInterpreterFrame *skip_frame)
 {
-    if (globals == NULL) {
-        return 0;
-    }
     if (frame == skip_frame) {
-        return 0;
+        return;
     }
-    int r = PyDict_Contains(globals, &_Py_ID(__lltrace__));
-    if (r < 0) {
-        return -1;
-    }
-    int lltrace = r * 5;  // Levels 1-4 only trace uops
-    if (!lltrace) {
-        // Can also be controlled by environment variable
-        char *python_lltrace = Py_GETENV("PYTHON_LLTRACE");
-        if (python_lltrace != NULL && *python_lltrace >= '0') {
-            lltrace = *python_lltrace - '0';  // TODO: Parse an int and all that
-        }
-    }
-    if (lltrace >= 5) {
+    if (_PyInterpreterState_GET()->lltrace >= 5) {
         lltrace_resume_frame(frame);
     }
-    return lltrace;
 }
 
 #endif
@@ -743,9 +727,6 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
 #endif
     uint8_t opcode;    /* Current opcode */
     int oparg;         /* Current opcode argument, if any */
-#ifdef LLTRACE
-    int lltrace = 0;
-#endif
 
     _PyInterpreterFrame  entry_frame;
 
@@ -810,10 +791,7 @@ resume_frame:
     stack_pointer = _PyFrame_GetStackPointer(frame);
 
 #ifdef LLTRACE
-    lltrace = maybe_lltrace_resume_frame(frame, &entry_frame, GLOBALS());
-    if (lltrace < 0) {
-        goto exit_unwind;
-    }
+    maybe_lltrace_resume_frame(frame, &entry_frame);
 #endif
 
 #ifdef Py_DEBUG
@@ -932,9 +910,7 @@ exception_unwind:
             }
             /* Resume normal execution */
 #ifdef LLTRACE
-            if (lltrace >= 5) {
-                lltrace_resume_frame(frame);
-            }
+            maybe_lltrace_resume_frame(frame, &entry_frame);
 #endif
             DISPATCH();
         }
@@ -990,7 +966,7 @@ enter_tier_two:
 
 #ifdef Py_DEBUG
     #define DPRINTF(level, ...) \
-        if (lltrace >= (level)) { printf(__VA_ARGS__); }
+        if (tstate->interp->lltrace >= (level)) { printf(__VA_ARGS__); }
 #else
     #define DPRINTF(level, ...)
 #endif
@@ -1007,7 +983,7 @@ tier2_dispatch:
     for (;;) {
         uopcode = next_uop->opcode;
 #ifdef Py_DEBUG
-        if (lltrace >= 3) {
+        if (tstate->interp->lltrace >= 3) {
             if (next_uop->opcode == _START_EXECUTOR) {
                 printf("%4d uop: ", 0);
             }
@@ -1048,7 +1024,7 @@ tier2_dispatch:
 
 jump_to_error_target:
 #ifdef Py_DEBUG
-    if (lltrace >= 2) {
+    if (tstate->interp->lltrace >= 2) {
         printf("Error: [UOp ");
         _PyUOpPrint(&next_uop[-1]);
         printf(" @ %d -> %s]\n",
@@ -1084,7 +1060,7 @@ exit_to_tier1:
     next_instr = next_uop[-1].target + _PyCode_CODE(_PyFrame_GetCode(frame));
 goto_to_tier1:
 #ifdef Py_DEBUG
-    if (lltrace >= 2) {
+    if (tstate->interp->lltrace >= 2) {
         printf("DEOPT: [UOp ");
         _PyUOpPrint(&next_uop[-1]);
         printf(" -> %s]\n",
