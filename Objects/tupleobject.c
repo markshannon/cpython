@@ -82,6 +82,36 @@ PyTuple_New(Py_ssize_t size)
     return (PyObject *) op;
 }
 
+PyObject *
+_PyTuple_MakePairSteal(PyObject *left, PyObject *right)
+{
+    /* inline tuple_alloc(2) */
+    PyTupleObject *op = _Py_FREELIST_POP(PyTupleObject, tuples[1]);
+    if (op == NULL) {
+        return NULL;
+    }
+    op->ob_item[0] = left;
+    op->ob_item[1] = right;
+    _PyObject_GC_TRACK(op);
+    return (PyObject *)op;
+}
+
+PyObject *
+PyTuple_MakePair(PyObject *left, PyObject *right)
+{
+    /* inline tuple_alloc(2) */
+    PyTupleObject *op = _Py_FREELIST_POP(PyTupleObject, tuples[1]);
+    if (op == NULL) {
+        return NULL;
+    }
+    Py_INCREF(left);
+    Py_INCREF(right);
+    op->ob_item[0] = left;
+    op->ob_item[1] = right;
+    _PyObject_GC_TRACK(op);
+    return (PyObject *)op;
+}
+
 Py_ssize_t
 PyTuple_Size(PyObject *op)
 {

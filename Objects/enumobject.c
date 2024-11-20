@@ -18,7 +18,6 @@ typedef struct {
     PyObject_HEAD
     Py_ssize_t en_index;           /* current index of enumeration */
     PyObject* en_sit;              /* secondary iterator of enumeration */
-    PyObject* en_result;           /* result tuple  */
     PyObject* en_longindex;        /* index for sequences >= PY_SSIZE_T_MAX */
     PyObject* one;                 /* borrowed reference */
 } enumobject;
@@ -154,7 +153,6 @@ enum_dealloc(enumobject *en)
 {
     PyObject_GC_UnTrack(en);
     Py_XDECREF(en->en_sit);
-    Py_XDECREF(en->en_result);
     Py_XDECREF(en->en_longindex);
     Py_TYPE(en)->tp_free(en);
 }
@@ -163,7 +161,6 @@ static int
 enum_traverse(enumobject *en, visitproc visit, void *arg)
 {
     Py_VISIT(en->en_sit);
-    Py_VISIT(en->en_result);
     Py_VISIT(en->en_longindex);
     return 0;
 }
@@ -171,11 +168,8 @@ enum_traverse(enumobject *en, visitproc visit, void *arg)
 static PyObject *
 enum_next_long(enumobject *en, PyObject* next_item)
 {
-    PyObject *result = en->en_result;
     PyObject *next_index;
     PyObject *stepped_up;
-    PyObject *old_index;
-    PyObject *old_item;
 
     if (en->en_longindex == NULL) {
         en->en_longindex = PyLong_FromSsize_t(PY_SSIZE_T_MAX);
@@ -192,31 +186,7 @@ enum_next_long(enumobject *en, PyObject* next_item)
         return NULL;
     }
     en->en_longindex = stepped_up;
-
-    if (Py_REFCNT(result) == 1) {
-        Py_INCREF(result);
-        old_index = PyTuple_GET_ITEM(result, 0);
-        old_item = PyTuple_GET_ITEM(result, 1);
-        PyTuple_SET_ITEM(result, 0, next_index);
-        PyTuple_SET_ITEM(result, 1, next_item);
-        Py_DECREF(old_index);
-        Py_DECREF(old_item);
-        // bpo-42536: The GC may have untracked this result tuple. Since we're
-        // recycling it, make sure it's tracked again:
-        if (!_PyObject_GC_IS_TRACKED(result)) {
-            _PyObject_GC_TRACK(result);
-        }
-        return result;
-    }
-    result = PyTuple_New(2);
-    if (result == NULL) {
-        Py_DECREF(next_index);
-        Py_DECREF(next_item);
-        return NULL;
-    }
-    PyTuple_SET_ITEM(result, 0, next_index);
-    PyTuple_SET_ITEM(result, 1, next_item);
-    return result;
+    return _PyTuple_MakePairSteal(next_index, next_item);
 }
 
 static PyObject *
@@ -224,10 +194,7 @@ enum_next(enumobject *en)
 {
     PyObject *next_index;
     PyObject *next_item;
-    PyObject *result = en->en_result;
     PyObject *it = en->en_sit;
-    PyObject *old_index;
-    PyObject *old_item;
 
     next_item = (*Py_TYPE(it)->tp_iternext)(it);
     if (next_item == NULL)
@@ -242,31 +209,7 @@ enum_next(enumobject *en)
         return NULL;
     }
     en->en_index++;
-
-    if (Py_REFCNT(result) == 1) {
-        Py_INCREF(result);
-        old_index = PyTuple_GET_ITEM(result, 0);
-        old_item = PyTuple_GET_ITEM(result, 1);
-        PyTuple_SET_ITEM(result, 0, next_index);
-        PyTuple_SET_ITEM(result, 1, next_item);
-        Py_DECREF(old_index);
-        Py_DECREF(old_item);
-        // bpo-42536: The GC may have untracked this result tuple. Since we're
-        // recycling it, make sure it's tracked again:
-        if (!_PyObject_GC_IS_TRACKED(result)) {
-            _PyObject_GC_TRACK(result);
-        }
-        return result;
-    }
-    result = PyTuple_New(2);
-    if (result == NULL) {
-        Py_DECREF(next_index);
-        Py_DECREF(next_item);
-        return NULL;
-    }
-    PyTuple_SET_ITEM(result, 0, next_index);
-    PyTuple_SET_ITEM(result, 1, next_item);
-    return result;
+    return _PyTuple_MakePairSteal(next_index, next_item);
 }
 
 static PyObject *
