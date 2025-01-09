@@ -682,6 +682,64 @@ def check_escaping_calls(instr: parser.InstDef, escapes: dict[lexer.Token, tuple
         elif tkn in calls and in_if:
             raise analysis_error(f"Escaping call '{tkn.text} in condition", tkn)
 
+SIMPLE_MACRO_NAMES = {
+    "ADVANCE_ADAPTIVE_COUNTER",
+    "PAUSE_ADAPTIVE_COUNTER",
+    "ADAPTIVE_COUNTER_TRIGGERS",
+    "LOCK_OBJECT",
+    "UNLOCK_OBJECT",
+    "LOCALS",
+    "GLOBALS",
+    "BUILTINS",
+    "STACKREFS_TO_PYOBJECTS",
+    "STACKREFS_TO_PYOBJECTS_CLEANUP",
+    "CONVERSION_FAILED",
+    "DK_IS_UNICODE",
+    "DK_UNICODE_ENTRIES",
+    "DEAD",
+    "INPUTS_DEAD",
+    "DECREF_INPUTS",
+    "DEOPT_IF",
+    "EXIT_IF",
+    "ERROR_IF",
+    "ERROR_NO_POP",
+    "STAT_INC",
+    "CALL_STAT_INC",
+    "OPCODE_DEFERRED_INC",
+    "EVAL_CALL_STAT_INC_IF_FUNCTION",
+    "DISPATCH",
+    "DISPATCH_INLINED",
+    "DISPATCH_SAME_OPARG",
+    "CURRENT_OPERAND0",
+    "GETLOCAL",
+    "SKIP_OVER",
+    "LOAD_SP",
+    "SYNC_SP",
+    "LOAD_IP",
+    "LLTRACE_RESUME_FRAME",
+    "WITHIN_STACK_BOUNDS",
+    "QSBR_QUIESCENT_STATE",
+    "GOTO_ERROR",
+    "STACK_LEVEL",
+    "PRE_DISPATCH_GOTO",
+    "DISPATCH_GOTO",
+    "JUMPBY",
+    "GETITEM",
+    "POP",
+    "TOP",
+    "PEEK",
+    "PUSH",
+    "EMPTY",
+    "STACK_SHRINK",
+    "RECORD_BRANCH_TAKEN",
+    "COMPARISON_BIT",
+    "GO_TO_INSTRUCTION",
+    "INSTR_OFFSET",
+    "GOTO_TIER_TWO",
+    "POP_DEAD_INPUTS",
+}
+
+
 def find_escaping_api_calls(instr: parser.InstDef) -> dict[lexer.Token, tuple[lexer.Token, lexer.Token]]:
     result: dict[lexer.Token, tuple[lexer.Token, lexer.Token]] = {}
     tokens = instr.block.tokens
@@ -695,9 +753,12 @@ def find_escaping_api_calls(instr: parser.InstDef) -> dict[lexer.Token, tuple[le
         if next_tkn.kind != lexer.LPAREN:
             continue
         if tkn.kind == lexer.IDENTIFIER:
-            if tkn.text.upper() == tkn.text:
-                # simple macro
+            if tkn.text.startswith("FT_ATOMIC"):
                 continue
+            if tkn.text in SIMPLE_MACRO_NAMES:
+                continue
+            #    # simple macro
+            #    continue
             #if not tkn.text.startswith(("Py", "_Py", "monitor")):
             #    continue
             if tkn.text.startswith(("sym_", "optimize_")):

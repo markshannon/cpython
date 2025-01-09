@@ -3614,7 +3614,9 @@
                 stack_pointer = _PyFrame_GetStackPointer(frame);
                 goto error;
             }
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, PyStackRef_NULL);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             DISPATCH();
         }
 
@@ -4648,7 +4650,9 @@
             stack_pointer = _PyFrame_GetStackPointer(frame);
             if (next != NULL) {
                 PUSH(PyStackRef_FromPyObjectSteal(next));
+                _PyFrame_SetStackPointer(frame, stack_pointer);
                 INSTRUMENTED_JUMP(this_instr, next_instr, PY_MONITORING_EVENT_BRANCH_LEFT);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
             }
             else {
                 if (_PyErr_Occurred(tstate)) {
@@ -4710,7 +4714,9 @@
             }
             // _MONITOR_JUMP_BACKWARD
             {
+                _PyFrame_SetStackPointer(frame, stack_pointer);
                 INSTRUMENTED_JUMP(this_instr, next_instr - oparg, PY_MONITORING_EVENT_JUMP);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
             }
             DISPATCH();
         }
@@ -4720,7 +4726,9 @@
             (void)this_instr;
             next_instr += 1;
             INSTRUCTION_STATS(INSTRUMENTED_JUMP_FORWARD);
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_JUMP);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             DISPATCH();
         }
 
@@ -4780,7 +4788,9 @@
             next_instr += 1;
             INSTRUCTION_STATS(INSTRUMENTED_NOT_TAKEN);
             (void)this_instr; // INSTRUMENTED_JUMP requires this_instr
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             INSTRUMENTED_JUMP(prev_instr, next_instr, PY_MONITORING_EVENT_BRANCH_LEFT);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             DISPATCH();
         }
 
@@ -4792,7 +4802,9 @@
             INSTRUCTION_STATS(INSTRUMENTED_POP_ITER);
             _PyStackRef iter;
             iter = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             INSTRUMENTED_JUMP(prev_instr, this_instr+1, PY_MONITORING_EVENT_BRANCH_RIGHT);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             PyStackRef_CLOSE(iter);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
@@ -4810,7 +4822,9 @@
             int jump = PyStackRef_IsFalse(cond);
             RECORD_BRANCH_TAKEN(this_instr[1].cache, jump);
             if (jump) {
+                _PyFrame_SetStackPointer(frame, stack_pointer);
                 INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_BRANCH_RIGHT);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
             }
             DISPATCH();
         }
@@ -4825,7 +4839,9 @@
             int jump = PyStackRef_IsNone(value_stackref);
             RECORD_BRANCH_TAKEN(this_instr[1].cache, jump);
             if (jump) {
+                _PyFrame_SetStackPointer(frame, stack_pointer);
                 INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_BRANCH_RIGHT);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
             }
             else {
                 PyStackRef_CLOSE(value_stackref);
@@ -4844,7 +4860,9 @@
             RECORD_BRANCH_TAKEN(this_instr[1].cache, jump);
             if (jump) {
                 PyStackRef_CLOSE(value_stackref);
+                _PyFrame_SetStackPointer(frame, stack_pointer);
                 INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_BRANCH_RIGHT);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
             }
             DISPATCH();
         }
@@ -4860,7 +4878,9 @@
             int jump = PyStackRef_IsTrue(cond);
             RECORD_BRANCH_TAKEN(this_instr[1].cache, jump);
             if (jump) {
+                _PyFrame_SetStackPointer(frame, stack_pointer);
                 INSTRUMENTED_JUMP(this_instr, next_instr + oparg, PY_MONITORING_EVENT_BRANCH_RIGHT);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
             }
             DISPATCH();
         }
@@ -6547,7 +6567,9 @@
             if (cell == NULL) {
                 goto error;
             }
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, PyStackRef_FromPyObjectSteal(cell));
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             DISPATCH();
         }
 
@@ -7059,8 +7081,8 @@
             PyGenObject *gen = (PyGenObject *)_Py_MakeCoro(func);
             stack_pointer = _PyFrame_GetStackPointer(frame);
             if (gen == NULL) goto error;
-            assert(EMPTY());
             _PyFrame_SetStackPointer(frame, stack_pointer);
+            assert(EMPTY());
             _PyInterpreterFrame *gen_frame = &gen->gi_iframe;
             frame->instr_ptr++;
             _PyFrame_Copy(frame, gen_frame);
@@ -7571,7 +7593,9 @@
             INSTRUCTION_STATS(STORE_FAST);
             _PyStackRef value;
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             DISPATCH();
@@ -7586,7 +7610,9 @@
             value1 = stack_pointer[-1];
             uint32_t oparg1 = oparg >> 4;
             uint32_t oparg2 = oparg & 15;
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg1, value1);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             value2 = PyStackRef_DUP(GETLOCAL(oparg2));
             stack_pointer[-1] = value2;
             DISPATCH();
@@ -7602,9 +7628,15 @@
             value2 = stack_pointer[-2];
             uint32_t oparg1 = oparg >> 4;
             uint32_t oparg2 = oparg & 15;
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg1, value1);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
+            stack_pointer += -1;
+            assert(WITHIN_STACK_BOUNDS());
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg2, value2);
-            stack_pointer += -2;
+            stack_pointer = _PyFrame_GetStackPointer(frame);
+            stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             DISPATCH();
         }

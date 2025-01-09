@@ -300,7 +300,9 @@
             oparg = 0;
             assert(oparg == CURRENT_OPARG());
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -311,7 +313,9 @@
             oparg = 1;
             assert(oparg == CURRENT_OPARG());
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -322,7 +326,9 @@
             oparg = 2;
             assert(oparg == CURRENT_OPARG());
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -333,7 +339,9 @@
             oparg = 3;
             assert(oparg == CURRENT_OPARG());
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -344,7 +352,9 @@
             oparg = 4;
             assert(oparg == CURRENT_OPARG());
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -355,7 +365,9 @@
             oparg = 5;
             assert(oparg == CURRENT_OPARG());
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -366,7 +378,9 @@
             oparg = 6;
             assert(oparg == CURRENT_OPARG());
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -377,7 +391,9 @@
             oparg = 7;
             assert(oparg == CURRENT_OPARG());
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -387,7 +403,9 @@
             _PyStackRef value;
             oparg = CURRENT_OPARG();
             value = stack_pointer[-1];
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, value);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             break;
@@ -2060,7 +2078,9 @@
                 stack_pointer = _PyFrame_GetStackPointer(frame);
                 if (1) JUMP_TO_ERROR();
             }
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, PyStackRef_NULL);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             break;
         }
 
@@ -2073,7 +2093,9 @@
             if (cell == NULL) {
                 JUMP_TO_ERROR();
             }
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             SETLOCAL(oparg, PyStackRef_FromPyObjectSteal(cell));
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             break;
         }
 
@@ -5582,8 +5604,8 @@
             PyGenObject *gen = (PyGenObject *)_Py_MakeCoro(func);
             stack_pointer = _PyFrame_GetStackPointer(frame);
             if (gen == NULL) JUMP_TO_ERROR();
-            assert(EMPTY());
             _PyFrame_SetStackPointer(frame, stack_pointer);
+            assert(EMPTY());
             _PyInterpreterFrame *gen_frame = &gen->gi_iframe;
             frame->instr_ptr++;
             _PyFrame_Copy(frame, gen_frame);
@@ -5816,7 +5838,9 @@
         }
 
         case _JUMP_TO_TOP: {
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             JUMP_TO_JUMP_TARGET();
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             break;
         }
 
@@ -5859,7 +5883,9 @@
             _Py_CODEUNIT *target = _PyFrame_GetBytecode(frame) + exit->target;
             stack_pointer = _PyFrame_GetStackPointer(frame);
             #if defined(Py_DEBUG) && !defined(_Py_JIT)
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             OPT_HIST(trace_uop_execution_counter, trace_run_length_hist);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             if (lltrace >= 2) {
                 _PyFrame_SetStackPointer(frame, stack_pointer);
                 printf("SIDE EXIT: [UOp ");
@@ -5880,7 +5906,9 @@
                 if (!backoff_counter_triggers(temperature)) {
                     exit->temperature = advance_backoff_counter(temperature);
                     tstate->previous_executor = (PyObject *)current_executor;
+                    _PyFrame_SetStackPointer(frame, stack_pointer);
                     GOTO_TIER_ONE(target);
+                    stack_pointer = _PyFrame_GetStackPointer(frame);
                 }
                 _PyExecutorObject *executor;
                 if (target->op.code == ENTER_EXECUTOR) {
@@ -5895,10 +5923,14 @@
                     if (optimized <= 0) {
                         exit->temperature = restart_backoff_counter(temperature);
                         if (optimized < 0) {
+                            _PyFrame_SetStackPointer(frame, stack_pointer);
                             GOTO_UNWIND();
+                            stack_pointer = _PyFrame_GetStackPointer(frame);
                         }
                         tstate->previous_executor = (PyObject *)current_executor;
+                        _PyFrame_SetStackPointer(frame, stack_pointer);
                         GOTO_TIER_ONE(target);
+                        stack_pointer = _PyFrame_GetStackPointer(frame);
                     }
                     else {
                         exit->temperature = initial_temperature_backoff_counter();
@@ -6077,7 +6109,9 @@
             _PyExitData *exit = (_PyExitData *)exit_p;
             _Py_CODEUNIT *target = frame->instr_ptr;
             #if defined(Py_DEBUG) && !defined(_Py_JIT)
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             OPT_HIST(trace_uop_execution_counter, trace_run_length_hist);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             if (lltrace >= 2) {
                 _PyFrame_SetStackPointer(frame, stack_pointer);
                 printf("DYNAMIC EXIT: [UOp ");
@@ -6098,7 +6132,9 @@
             else {
                 if (!backoff_counter_triggers(exit->temperature)) {
                     exit->temperature = advance_backoff_counter(exit->temperature);
+                    _PyFrame_SetStackPointer(frame, stack_pointer);
                     GOTO_TIER_ONE(target);
+                    stack_pointer = _PyFrame_GetStackPointer(frame);
                 }
                 _PyFrame_SetStackPointer(frame, stack_pointer);
                 int optimized = _PyOptimizer_Optimize(frame, target, stack_pointer, &executor, 0);
@@ -6106,9 +6142,13 @@
                 if (optimized <= 0) {
                     exit->temperature = restart_backoff_counter(exit->temperature);
                     if (optimized < 0) {
+                        _PyFrame_SetStackPointer(frame, stack_pointer);
                         GOTO_UNWIND();
+                        stack_pointer = _PyFrame_GetStackPointer(frame);
                     }
+                    _PyFrame_SetStackPointer(frame, stack_pointer);
                     GOTO_TIER_ONE(target);
+                    stack_pointer = _PyFrame_GetStackPointer(frame);
                 }
                 else {
                     exit->temperature = initial_temperature_backoff_counter();
@@ -6155,7 +6195,9 @@
         }
 
         case _DEOPT: {
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             EXIT_TO_TIER1();
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             break;
         }
 
@@ -6167,7 +6209,9 @@
             _PyFrame_SetStackPointer(frame, stack_pointer);
             frame->instr_ptr = _PyFrame_GetBytecode(frame) + target;
             stack_pointer = _PyFrame_GetStackPointer(frame);
+            _PyFrame_SetStackPointer(frame, stack_pointer);
             GOTO_UNWIND();
+            stack_pointer = _PyFrame_GetStackPointer(frame);
             break;
         }
 
