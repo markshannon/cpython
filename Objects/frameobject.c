@@ -943,6 +943,13 @@ int
 PyFrame_GetLineNumber(PyFrameObject *f)
 {
     assert(f != NULL);
+    if (f->f_lineno > 0) {
+        return f->f_lineno;
+    }
+    if (f->f_frame->owner == FRAME_OWNED_BY_EXTENSION) {
+        f->f_lineno = 1;
+        return 1;
+    }
     if (f->f_lineno == -1) {
         // We should calculate it once. If we can't get the line number,
         // set f->f_lineno to 0.
@@ -953,9 +960,6 @@ PyFrame_GetLineNumber(PyFrameObject *f)
         }
     }
 
-    if (f->f_lineno > 0) {
-        return f->f_lineno;
-    }
     return PyUnstable_InterpreterFrame_GetLine(f->f_frame);
 }
 
@@ -1889,8 +1893,10 @@ frame_sizeof(PyObject *op, PyObject *Py_UNUSED(ignored))
     PyFrameObject *f = PyFrameObject_CAST(op);
     Py_ssize_t res;
     res = offsetof(PyFrameObject, _f_frame_data) + offsetof(_PyInterpreterFrame, localsplus);
-    PyCodeObject *code = _PyFrame_GetCode(f->f_frame);
-    res += _PyFrame_NumSlotsForCodeObject(code) * sizeof(PyObject *);
+    if (f->f_frame-> owner < FRAME_OWNED_BY_EXTENSION) {
+        PyCodeObject *code = _PyFrame_GetCode(f->f_frame);
+        res += _PyFrame_NumSlotsForCodeObject(code) * sizeof(PyObject *);
+    }
     return PyLong_FromSsize_t(res);
 }
 
@@ -1902,10 +1908,27 @@ frame_repr(PyObject *op)
 {
     PyFrameObject *f = PyFrameObject_CAST(op);
     int lineno = PyFrame_GetLineNumber(f);
-    PyCodeObject *code = _PyFrame_GetCode(f->f_frame);
-    return PyUnicode_FromFormat(
-        "<frame at %p, file %R, line %d, code %S>",
-        f, code->co_filename, lineno, code->co_name);
+    PyObject *codelike = PyStackRef_AsPyObjectBorrow(f->f_frame->f_executable);
+    if (PyCode_Check(codelike)) {
+        PyCodeObject *code = (PyCodeObject *)codelike;
+        return PyUnicode_FromFormat(
+            "<frame at %p, file %R, line %d, code %S>",
+            f, code->co_filename, lineno, code->co_name);
+    }
+    PyObject *res = NULL;
+    PyObject *name = NULL;
+    PyObject *filename = PyObject_GetAttr(codelike, &_Py_ID(co_filename));
+    if (filename != NULL) {
+        name = PyObject_GetAttr(codelike, &_Py_ID(co_name));
+        if (name != NULL) {
+            res = PyUnicode_FromFormat(
+            "<frame at %p, file %R, line %d, code %S>",
+            f, filename, lineno, name);
+        }
+    }
+    Py_XDECREF(name);
+    Py_XDECREF(filename);
+    return res;
 }
 
 static PyMethodDef frame_methods[] = {

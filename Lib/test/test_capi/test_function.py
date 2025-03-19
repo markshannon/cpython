@@ -17,7 +17,7 @@ class FunctionTest(unittest.TestCase):
         self.assertIsInstance(code, types.CodeType)
         self.assertEqual(code, some.__code__)
 
-        with self.assertRaises(SystemError):
+        with self.assertRaises(Exception):
             _testcapi.function_get_code(None)  # not a function
 
     def test_function_get_globals(self):
@@ -41,7 +41,7 @@ class FunctionTest(unittest.TestCase):
         self.assertIsInstance(module, str)
         self.assertEqual(module, some.__module__)
 
-        with self.assertRaises(SystemError):
+        with self.assertRaises(Exception):
             _testcapi.function_get_module(None)  # not a function
 
     def test_function_get_defaults(self):

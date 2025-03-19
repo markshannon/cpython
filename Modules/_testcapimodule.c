@@ -2556,6 +2556,12 @@ call_with_extension_frame(PyObject* self, PyObject* const* args, Py_ssize_t narg
         return NULL;
     }
     PyObject *res = PyObject_CallNoArgs(callee);
+    if (res == NULL) {
+        PyFrameObject *f = PyEval_GetFrame();
+        if (f != NULL) {
+            PyTraceBack_AtLine(f, 1);
+        }
+    }
     Py_PopExtensionFrame(tstate);
     return res;
 }

@@ -269,6 +269,26 @@ _PyTraceBack_FromFrame(PyObject *tb_next, PyFrameObject *frame)
 
 
 int
+PyTraceBack_AtLine(PyFrameObject *frame, int line)
+{
+    PyObject *exc = PyErr_GetRaisedException();
+    assert(PyExceptionInstance_Check(exc));
+    PyObject *tb = PyException_GetTraceback(exc);
+    PyObject *newtb = tb_create_raw((PyTracebackObject *)tb, frame, 0, line);
+    frame->f_lineno = line;
+    Py_XDECREF(tb);
+    if (newtb == NULL) {
+        _PyErr_ChainExceptions1(exc);
+        return -1;
+    }
+    PyException_SetTraceback(exc, newtb);
+    Py_XDECREF(newtb);
+    PyErr_SetRaisedException(exc);
+    return 0;
+}
+
+
+int
 PyTraceBack_Here(PyFrameObject *frame)
 {
     PyObject *exc = PyErr_GetRaisedException();

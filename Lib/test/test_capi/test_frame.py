@@ -1,4 +1,5 @@
 import sys
+import traceback
 import unittest
 from test.support import import_helper
 
@@ -52,19 +53,21 @@ class FrameTest(unittest.TestCase):
         self.assertIsNone(frame.f_back)
 
 
+class CodeLike:
+
+    co_filename = "test_frame.py"
+    co_name = "CodeLike"
+
+class FuncLike:
+
+    def __init__(self, code):
+        self.__name__ = "func-like"
+        self.__code__ = code
+        self.__module__ = "cheeseshop"
+
 class ExtensionFrameTest(unittest.TestCase):
 
-
     def test_frame(self):
-        class CodeLike:
-            pass
-
-        class FuncLike:
-
-            def __init__(self, code):
-                self.__code__ = code
-                self.__module__ = "cheeseshop"
-
         def return_caller_frame():
             return sys._getframe(1), sys._getframemodulename(1)
 
@@ -73,6 +76,24 @@ class ExtensionFrameTest(unittest.TestCase):
         f, m = _testcapi.call_with_extension_frame(funclike, codelike, return_caller_frame)
         self.assertEqual(f.f_code, codelike)
         self.assertEqual(m, "cheeseshop")
+
+    def test_backtrace(self):
+        def div_zero():
+            1/0
+
+        codelike = CodeLike()
+        funclike = FuncLike(codelike)
+        try:
+            _testcapi.call_with_extension_frame(funclike, codelike, div_zero)
+        except Exception as e:
+            tb = e.__traceback__
+        tb_list = []
+        while tb:
+            tb_list.append(str(tb.tb_frame))
+            tb = tb.tb_next
+        self.assertIn("test_backtrace", tb_list[0])
+        self.assertIn("CodeLike", tb_list[1])
+        self.assertIn("div_zero", tb_list[2])
 
 
 if __name__ == "__main__":
