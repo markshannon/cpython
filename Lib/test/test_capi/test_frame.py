@@ -52,5 +52,28 @@ class FrameTest(unittest.TestCase):
         self.assertIsNone(frame.f_back)
 
 
+class ExtensionFrameTest(unittest.TestCase):
+
+
+    def test_frame(self):
+        class CodeLike:
+            pass
+
+        class FuncLike:
+
+            def __init__(self, code):
+                self.__code__ = code
+                self.__module__ = "cheeseshop"
+
+        def return_caller_frame():
+            return sys._getframe(1), sys._getframemodulename(1)
+
+        codelike = CodeLike()
+        funclike = FuncLike(codelike)
+        f, m = _testcapi.call_with_extension_frame(funclike, codelike, return_caller_frame)
+        self.assertEqual(f.f_code, codelike)
+        self.assertEqual(m, "cheeseshop")
+
+
 if __name__ == "__main__":
     unittest.main()

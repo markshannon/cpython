@@ -1012,7 +1012,8 @@ frame_getcode(PyObject *op, void *Py_UNUSED(closure))
     if (PySys_Audit("object.__getattr__", "Os", f, "f_code") < 0) {
         return NULL;
     }
-    return (PyObject *)PyFrame_GetCode(f);
+    PyObject *executable = PyStackRef_AsPyObjectBorrow(f->f_frame->f_executable);
+    return Py_NewRef(executable);
 }
 
 static PyObject *
@@ -1959,10 +1960,10 @@ init_frame(PyThreadState *tstate, _PyInterpreterFrame *frame,
 }
 
 PyFrameObject*
-_PyFrame_New_NoTrack(PyCodeObject *code)
+_PyFrame_New_NoTrack(int slots)
 {
     CALL_STAT_INC(frame_objects_created);
-    int slots = code->co_nlocalsplus + code->co_stacksize;
+
     PyFrameObject *f = PyObject_GC_NewVar(PyFrameObject, &PyFrame_Type, slots);
     if (f == NULL) {
         return NULL;
@@ -2001,7 +2002,8 @@ PyFrame_New(PyThreadState *tstate, PyCodeObject *code,
     if (func == NULL) {
         return NULL;
     }
-    PyFrameObject *f = _PyFrame_New_NoTrack(code);
+    int slots = code->co_nlocalsplus + code->co_stacksize;
+    PyFrameObject *f = _PyFrame_New_NoTrack(slots);
     if (f == NULL) {
         Py_DECREF(func);
         return NULL;

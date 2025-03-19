@@ -36,7 +36,7 @@ struct _frame {
     PyObject *_f_frame_data[1];
 };
 
-extern PyFrameObject* _PyFrame_New_NoTrack(PyCodeObject *code);
+extern PyFrameObject* _PyFrame_New_NoTrack(int slots);
 
 
 /* other API */
@@ -57,8 +57,9 @@ enum _frameowner {
     FRAME_OWNED_BY_THREAD = 0,
     FRAME_OWNED_BY_GENERATOR = 1,
     FRAME_OWNED_BY_FRAME_OBJECT = 2,
-    FRAME_OWNED_BY_INTERPRETER = 3,
-    FRAME_OWNED_BY_CSTACK = 4,
+    FRAME_OWNED_BY_EXTENSION = 3,
+    FRAME_OWNED_BY_INTERPRETER = 4,
+    FRAME_OWNED_BY_CSTACK = 5,
 };
 
 typedef struct _PyInterpreterFrame {
@@ -269,9 +270,11 @@ _PyFrame_IsIncomplete(_PyInterpreterFrame *frame)
     if (frame->owner >= FRAME_OWNED_BY_INTERPRETER) {
         return true;
     }
-    return frame->owner != FRAME_OWNED_BY_GENERATOR &&
-           frame->instr_ptr < _PyFrame_GetBytecode(frame) +
-                                  _PyFrame_GetCode(frame)->_co_firsttraceable;
+    if (frame->owner == FRAME_OWNED_BY_THREAD) {
+        _Py_CODEUNIT *first = _PyFrame_GetBytecode(frame) + _PyFrame_GetCode(frame)->_co_firsttraceable;
+        return frame->instr_ptr < first;
+    }
+    return false;
 }
 
 static inline _PyInterpreterFrame *

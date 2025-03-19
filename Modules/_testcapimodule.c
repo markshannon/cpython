@@ -2540,6 +2540,26 @@ toggle_reftrace_printer(PyObject *ob, PyObject *arg)
     Py_RETURN_NONE;
 }
 
+static PyObject*
+call_with_extension_frame(PyObject* self, PyObject* const* args, Py_ssize_t nargsf)
+{
+    Py_ssize_t nargs = _PyVectorcall_NARGS(nargsf);
+    if (nargs != 3) {
+        PyErr_SetString(PyExc_TypeError, "call_with_extension_frame takes 3 arguments");
+        return NULL;
+    }
+    PyObject *funclike = args[0];
+    PyObject *codelike = args[1];
+    PyObject *callee = args[2];
+    PyThreadState *tstate = PyThreadState_Get();
+    if (Py_PushExtensionFrame(tstate, funclike, codelike) < 0) {
+        return NULL;
+    }
+    PyObject *res = PyObject_CallNoArgs(callee);
+    Py_PopExtensionFrame(tstate);
+    return res;
+}
+
 static PyMethodDef TestMethods[] = {
     {"set_errno",               set_errno,                       METH_VARARGS},
     {"test_config",             test_config,                     METH_NOARGS},
@@ -2634,6 +2654,7 @@ static PyMethodDef TestMethods[] = {
     {"test_atexit", test_atexit, METH_NOARGS},
     {"code_offset_to_line", _PyCFunction_CAST(code_offset_to_line), METH_FASTCALL},
     {"toggle_reftrace_printer", toggle_reftrace_printer, METH_O},
+    {"call_with_extension_frame", _PyCFunction_CAST(call_with_extension_frame), METH_FASTCALL},
     {NULL, NULL} /* sentinel */
 };
 

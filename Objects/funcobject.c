@@ -410,8 +410,7 @@ PyObject *
 PyFunction_GetCode(PyObject *op)
 {
     if (!PyFunction_Check(op)) {
-        PyErr_BadInternalCall();
-        return NULL;
+        return PyObject_GetAttr(op, &_Py_ID(__code__));
     }
     return ((PyFunctionObject *) op) -> func_code;
 }
@@ -430,8 +429,7 @@ PyObject *
 PyFunction_GetModule(PyObject *op)
 {
     if (!PyFunction_Check(op)) {
-        PyErr_BadInternalCall();
-        return NULL;
+        return PyObject_GetAttr(op, &_Py_ID(__module__));
     }
     return ((PyFunctionObject *) op) -> func_module;
 }

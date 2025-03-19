@@ -25,7 +25,15 @@ _PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame *frame)
     assert(frame->frame_obj == NULL);
     PyObject *exc = PyErr_GetRaisedException();
 
-    PyFrameObject *f = _PyFrame_New_NoTrack(_PyFrame_GetCode(frame));
+    int slots;
+    if (frame->owner == FRAME_OWNED_BY_EXTENSION) {
+        slots = 0;
+    }
+    else {
+        PyCodeObject *code = _PyFrame_GetCode(frame);
+        slots = code->co_nlocalsplus + code->co_stacksize;
+    }
+    PyFrameObject *f = _PyFrame_New_NoTrack(slots);
     if (f == NULL) {
         Py_XDECREF(exc);
         return NULL;
@@ -153,3 +161,42 @@ const PyTypeObject *const PyUnstable_ExecutableKinds[PyUnstable_EXECUTABLE_KINDS
     [PyUnstable_EXECUTABLE_KIND_METHOD_DESCRIPTOR] = &PyMethodDescr_Type,
     [PyUnstable_EXECUTABLE_KINDS] = NULL,
 };
+
+int
+Py_PushExtensionFrame(PyThreadState *tstate, PyObject *funclike, PyObject *codelike)
+{
+    _PyInterpreterFrame *frame = _PyThreadState_PushFrame(tstate, sizeof(_PyInterpreterFrame));
+    if (frame == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    frame->f_funcobj = PyStackRef_FromPyObjectNew(funclike);
+    frame->f_executable = PyStackRef_FromPyObjectNew(codelike);
+    frame->stackpointer = frame->localsplus;
+#ifdef Py_DEBUG
+    frame->f_globals = NULL;
+    frame->f_builtins = NULL;
+    frame->f_locals = NULL;
+    frame->frame_obj = NULL;
+    frame->instr_ptr = NULL;
+#  ifdef Py_GIL_DISABLED
+    frame->tlbc_index = -1;
+#  endif
+#endif
+    frame->visited = 0;
+    frame->owner = FRAME_OWNED_BY_EXTENSION;
+    frame->previous = tstate->current_frame;
+    tstate->current_frame = frame;
+    return 0;
+}
+
+void
+Py_PopExtensionFrame(PyThreadState *tstate)
+{
+    _PyInterpreterFrame *frame = tstate->current_frame;
+    assert(frame->owner == FRAME_OWNED_BY_EXTENSION);
+    tstate->current_frame = frame->previous;
+    _PyFrame_ClearExceptCode(frame);
+    PyStackRef_CLEAR(frame->f_executable);
+    _PyThreadState_PopFrame(tstate, frame);
+}

@@ -28,6 +28,9 @@ PyAPI_FUNC(int) _PyFrame_IsEntryFrame(PyFrameObject *frame);
 PyAPI_FUNC(int) PyFrame_FastToLocalsWithError(PyFrameObject *f);
 PyAPI_FUNC(void) PyFrame_FastToLocals(PyFrameObject *);
 
+PyAPI_FUNC(int) Py_PushExtensionFrame(PyThreadState *tstate, PyObject *funclike, PyObject *codelike);
+
+PyAPI_FUNC(void) Py_PopExtensionFrame(PyThreadState *tstate);
 
 typedef struct {
     PyObject_HEAD
