@@ -5809,6 +5809,21 @@
             DISPATCH();
         }
 
+        TARGET(FUNCTION_ENTRY) {
+            #if Py_TAIL_CALL_INTERP
+            int opcode = FUNCTION_ENTRY;
+            (void)(opcode);
+            #endif
+            _Py_CODEUNIT* const this_instr = next_instr;
+            (void)this_instr;
+            frame->instr_ptr = next_instr;
+            next_instr += 2;
+            INSTRUCTION_STATS(FUNCTION_ENTRY);
+            uint16_t counter = read_u16(&this_instr[1].cache);
+            (void)counter;
+            DISPATCH();
+        }
+
         TARGET(GET_AITER) {
             #if Py_TAIL_CALL_INTERP
             int opcode = GET_AITER;

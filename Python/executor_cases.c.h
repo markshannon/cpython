@@ -12,6 +12,11 @@
             break;
         }
 
+        case _FUNCTION_ENTRY: {
+            uint16_t counter = (uint16_t)CURRENT_OPERAND0();
+            break;
+        }
+
         case _CHECK_PERIODIC: {
             _Py_CHECK_EMSCRIPTEN_SIGNALS_PERIODICALLY();
             QSBR_QUIESCENT_STATE(tstate);

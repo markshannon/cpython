@@ -20,6 +20,7 @@ extern int _PyUop_num_popped(int opcode, int oparg);
 #ifdef NEED_OPCODE_METADATA
 const uint16_t _PyUop_Flags[MAX_UOP_ID+1] = {
     [_NOP] = HAS_PURE_FLAG,
+    [_FUNCTION_ENTRY] = 0,
     [_CHECK_PERIODIC] = HAS_EVAL_BREAK_FLAG | HAS_ERROR_FLAG | HAS_ESCAPES_FLAG,
     [_CHECK_PERIODIC_IF_NOT_YIELD_FROM] = HAS_ARG_FLAG | HAS_EVAL_BREAK_FLAG | HAS_ERROR_FLAG | HAS_ESCAPES_FLAG,
     [_RESUME_CHECK] = HAS_DEOPT_FLAG,
@@ -387,6 +388,7 @@ const char *const _PyOpcode_uop_name[MAX_UOP_ID+1] = {
     [_FORMAT_WITH_SPEC] = "_FORMAT_WITH_SPEC",
     [_FOR_ITER_GEN_FRAME] = "_FOR_ITER_GEN_FRAME",
     [_FOR_ITER_TIER_TWO] = "_FOR_ITER_TIER_TWO",
+    [_FUNCTION_ENTRY] = "_FUNCTION_ENTRY",
     [_GET_AITER] = "_GET_AITER",
     [_GET_ANEXT] = "_GET_ANEXT",
     [_GET_AWAITABLE] = "_GET_AWAITABLE",
@@ -558,6 +560,8 @@ int _PyUop_num_popped(int opcode, int oparg)
 {
     switch(opcode) {
         case _NOP:
+            return 0;
+        case _FUNCTION_ENTRY:
             return 0;
         case _CHECK_PERIODIC:
             return 0;

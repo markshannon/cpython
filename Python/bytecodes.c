@@ -151,6 +151,9 @@ dummy_func(
 
         macro(NOT_TAKEN) = NOP;
 
+        inst(FUNCTION_ENTRY, (counter/1 -- )) {
+        }
+
         op(_CHECK_PERIODIC, (--)) {
             _Py_CHECK_EMSCRIPTEN_SIGNALS_PERIODICALLY();
             QSBR_QUIESCENT_STATE(tstate);

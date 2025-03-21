@@ -7,6 +7,10 @@
             break;
         }
 
+        case _FUNCTION_ENTRY: {
+            break;
+        }
+
         case _CHECK_PERIODIC: {
             break;
         }

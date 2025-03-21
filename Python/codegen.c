@@ -651,6 +651,7 @@ codegen_enter_scope(compiler *c, identifier name, int scope_type,
         loc.lineno = 0;
     }
     ADDOP_I(c, loc, RESUME, RESUME_AT_FUNC_START);
+    ADDOP(c, NO_LOCATION, FUNCTION_ENTRY);
     return SUCCESS;
 }
 
