@@ -904,8 +904,22 @@ clear_freelist(struct _Py_freelist *freelist, int is_finalization,
     assert(freelist->freelist == NULL);
 
     if (is_finalization) {
-        _PyFreeList_Init(freelist, 0);
+        freelist->available = freelist->capacity = 0;
     }
+}
+
+static void
+enable_freelist(struct _Py_freelist *freelist, freefunc dofree)
+{
+    clear_freelist(freelist, 0, dofree);
+    freelist->available = freelist->capacity;
+}
+
+static void
+disable_freelist(struct _Py_freelist *freelist, freefunc dofree)
+{
+    clear_freelist(freelist, 0, dofree);
+    freelist->available = 0;
 }
 
 static void
@@ -922,6 +936,9 @@ _PyObject_ClearFreeLists(struct _Py_freelists *freelists, int is_finalization)
 {
     // In the free-threaded build, freelists are per-PyThreadState and cleared in PyThreadState_Clear()
     // In the default build, freelists are per-interpreter and cleared in finalize_interp_types()
+    for (Py_ssize_t i = 0; i < NB_SMALL_SIZE_CLASSES; i++) {
+        clear_freelist(&freelists->by_size[i], is_finalization, PyObject_Free);
+    }
     clear_freelist(&freelists->floats, is_finalization, free_object);
     for (Py_ssize_t i = 0; i < PyTuple_MAXSAVESIZE; i++) {
         clear_freelist(&freelists->tuples[i], is_finalization, free_object);
@@ -948,6 +965,68 @@ _PyObject_ClearFreeLists(struct _Py_freelists *freelists, int is_finalization)
     clear_freelist(&freelists->pycfunctionobject, is_finalization, PyObject_GC_Del);
     clear_freelist(&freelists->pycmethodobject, is_finalization, PyObject_GC_Del);
     clear_freelist(&freelists->pymethodobjects, is_finalization, free_object);
+}
+
+void
+_PyObject_EnableFreeLists(struct _Py_freelists *freelists)
+{
+    // In the free-threaded build, freelists are per-PyThreadState and cleared in PyThreadState_Clear()
+    // In the default build, freelists are per-interpreter and cleared in finalize_interp_types()
+    for (Py_ssize_t i = 0; i < NB_SMALL_SIZE_CLASSES; i++) {
+        enable_freelist(&freelists->by_size[i], PyObject_Free);
+    }
+    enable_freelist(&freelists->floats, free_object);
+    for (Py_ssize_t i = 0; i < PyTuple_MAXSAVESIZE; i++) {
+        enable_freelist(&freelists->tuples[i], free_object);
+    }
+    enable_freelist(&freelists->lists, free_object);
+    enable_freelist(&freelists->list_iters, free_object);
+    enable_freelist(&freelists->tuple_iters, free_object);
+    enable_freelist(&freelists->dicts, free_object);
+    enable_freelist(&freelists->dictkeys, PyMem_Free);
+    enable_freelist(&freelists->slices, free_object);
+    enable_freelist(&freelists->ranges, free_object);
+    enable_freelist(&freelists->range_iters, free_object);
+    enable_freelist(&freelists->contexts, free_object);
+    enable_freelist(&freelists->async_gens, free_object);
+    enable_freelist(&freelists->async_gen_asends, free_object);
+    enable_freelist(&freelists->futureiters, free_object);
+    enable_freelist(&freelists->unicode_writers, PyMem_Free);
+    enable_freelist(&freelists->ints, free_object);
+    enable_freelist(&freelists->pycfunctionobject, PyObject_GC_Del);
+    enable_freelist(&freelists->pycmethodobject, PyObject_GC_Del);
+    enable_freelist(&freelists->pymethodobjects, free_object);
+}
+
+void
+_PyObject_DisableFreeLists(struct _Py_freelists *freelists)
+{
+    // In the free-threaded build, freelists are per-PyThreadState and cleared in PyThreadState_Clear()
+    // In the default build, freelists are per-interpreter and cleared in finalize_interp_types()
+    for (Py_ssize_t i = 0; i < NB_SMALL_SIZE_CLASSES; i++) {
+        disable_freelist(&freelists->by_size[i], PyObject_Free);
+    }
+    disable_freelist(&freelists->floats, free_object);
+    for (Py_ssize_t i = 0; i < PyTuple_MAXSAVESIZE; i++) {
+        disable_freelist(&freelists->tuples[i], free_object);
+    }
+    disable_freelist(&freelists->lists, free_object);
+    disable_freelist(&freelists->list_iters, free_object);
+    disable_freelist(&freelists->tuple_iters, free_object);
+    disable_freelist(&freelists->dicts, free_object);
+    disable_freelist(&freelists->dictkeys, PyMem_Free);
+    disable_freelist(&freelists->slices, free_object);
+    disable_freelist(&freelists->ranges, free_object);
+    disable_freelist(&freelists->range_iters, free_object);
+    disable_freelist(&freelists->contexts, free_object);
+    disable_freelist(&freelists->async_gens, free_object);
+    disable_freelist(&freelists->async_gen_asends, free_object);
+    disable_freelist(&freelists->futureiters, free_object);
+    disable_freelist(&freelists->unicode_writers, PyMem_Free);
+    disable_freelist(&freelists->ints, free_object);
+    disable_freelist(&freelists->pycfunctionobject, PyObject_GC_Del);
+    disable_freelist(&freelists->pycmethodobject, PyObject_GC_Del);
+    disable_freelist(&freelists->pymethodobjects, free_object);
 }
 
 /*
@@ -3108,21 +3187,35 @@ _Py_SetRefcnt(PyObject *ob, Py_ssize_t refcnt)
     Py_SET_REFCNT(ob, refcnt);
 }
 
-int PyRefTracer_SetTracer(PyRefTracer tracer, void *data) {
-    _Py_AssertHoldsTstate();
+int
+_PyRefTracer_SetTracer(PyInterpreterState *interp, PyRefTracer tracer, void *data)
+{
+    if (_PyRuntime.ref_tracer.tracer_func == NULL) {
+        _PyObject_EnableFreeLists(&interp->object_state.freelists);
+    }
+    else {
+        _PyObject_DisableFreeLists(&interp->object_state.freelists);
+    }
     _PyRuntime.ref_tracer.tracer_func = tracer;
     _PyRuntime.ref_tracer.tracer_data = data;
     return 0;
 }
 
-PyRefTracer PyRefTracer_GetTracer(void** data) {
+int
+PyRefTracer_SetTracer(PyRefTracer tracer, void *data) {
+    _Py_AssertHoldsTstate();
+    PyThreadState *tstate = _PyThreadState_GET();
+    return _PyRefTracer_SetTracer(tstate->interp, tracer, data);
+}
+
+PyRefTracer
+PyRefTracer_GetTracer(void** data) {
     _Py_AssertHoldsTstate();
     if (data != NULL) {
         *data = _PyRuntime.ref_tracer.tracer_data;
     }
     return _PyRuntime.ref_tracer.tracer_func;
 }
-
 
 
 static PyObject* constants[] = {

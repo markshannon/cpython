@@ -594,6 +594,10 @@ free_interpreter(PyInterpreterState *interp)
 static void
 init_freelists(struct _Py_freelists *freelists)
 {
+    for (Py_ssize_t i = 0; i < NB_SMALL_SIZE_CLASSES; i++) {
+        int capacity = Py_MIN(1000, 4000/(i+1));
+        _PyFreeList_Init(&freelists->by_size[i], capacity);
+    }
     _PyFreeList_Init(&freelists->floats, Py_floats_MAXFREELIST);
     for (Py_ssize_t i = 0; i < PyTuple_MAXSAVESIZE; i++) {
         _PyFreeList_Init(&freelists->tuples[i], Py_tuple_MAXFREELIST);

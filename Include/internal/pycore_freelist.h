@@ -49,6 +49,10 @@ _Py_freelists_GET(void)
 static inline uint32_t
 _PyFreeList_Size(struct _Py_freelist *fl)
 {
+    if (fl->available == 0 && fl->freelist == NULL) {
+        // Disabled
+        return 0;
+    }
     return fl->capacity - fl->available;
 }
 

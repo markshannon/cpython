@@ -103,6 +103,9 @@ PyAPI_FUNC(PyStatus) _PyInterpreterState_New(
 extern const PyConfig* _PyInterpreterState_GetConfig(
     PyInterpreterState *interp);
 
+
+int _PyRefTracer_SetTracer(PyInterpreterState *interp, PyRefTracer tracer, void *data);
+
 #ifdef __cplusplus
 }
 #endif
