@@ -2262,14 +2262,15 @@ gc_alloc(PyTypeObject *tp, size_t basicsize, size_t presize)
     if (basicsize > PY_SSIZE_T_MAX - presize) {
         return _PyErr_NoMemory(tstate);
     }
-    size_t size = presize + basicsize;
-    char *mem = _PyObject_MallocWithType(tp, size);
-    if (mem == NULL) {
+    PyObject *op = _PyObject_NewTstate(tstate, tp, presize, basicsize);
+    if (op == NULL) {
         return _PyErr_NoMemory(tstate);
     }
+    assert(Py_TYPE(op) == tp);
+    assert(Py_REFCNT(op) == 1);
+    char *mem = ((char *)op) - presize;
     ((PyObject **)mem)[0] = NULL;
     ((PyObject **)mem)[1] = NULL;
-    PyObject *op = (PyObject *)(mem + presize);
     _PyObject_GC_Link(op);
     return op;
 }
@@ -2287,7 +2288,6 @@ _PyObject_GC_New(PyTypeObject *tp)
     if (op == NULL) {
         return NULL;
     }
-    _PyObject_Init(op, tp);
     if (tp->tp_flags & Py_TPFLAGS_INLINE_VALUES) {
         _PyObject_InitInlineValues(op, tp);
     }
@@ -2309,7 +2309,7 @@ _PyObject_GC_NewVar(PyTypeObject *tp, Py_ssize_t nitems)
     if (op == NULL) {
         return NULL;
     }
-    _PyObject_InitVar(op, tp, nitems);
+    Py_SET_SIZE(op, nitems);
     return op;
 }
 
@@ -2323,7 +2323,6 @@ PyUnstable_Object_GC_NewWithExtraData(PyTypeObject *tp, size_t extra_size)
         return NULL;
     }
     memset((char *)op + sizeof(PyObject), 0, size - sizeof(PyObject));
-    _PyObject_Init(op, tp);
     return op;
 }
 

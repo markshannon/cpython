@@ -1,6 +1,7 @@
 #ifndef Py_INTERNAL_OBJECT_ALLOC_H
 #define Py_INTERNAL_OBJECT_ALLOC_H
 
+#include "pycore_freelist.h"
 #include "pycore_object.h"      // _PyType_HasFeature()
 #include "pycore_pystate.h"     // _PyThreadState_GET()
 #include "pycore_tstate.h"      // _PyThreadStateImpl
@@ -29,6 +30,36 @@ _PyObject_GetAllocationHeap(_PyThreadStateImpl *tstate, PyTypeObject *tp)
     }
 }
 #endif
+
+
+static inline PyObject *
+_PyObject_NewTstate(PyThreadState *ts, PyTypeObject *tp, size_t presize, size_t size)
+{
+    size += presize;
+    assert(size > 0);
+    if (size <= SMALL_REQUEST_THRESHOLD) {
+        int size_cls = (size - 1) >> ALIGNMENT_SHIFT;
+        struct _Py_freelist *fl = &ts->interp->object_state.freelists.by_size[size_cls];
+        char *mem = _PyFreeList_PopMem(fl);
+        if (mem != NULL) {
+            PyObject *op = (PyObject *)(mem + presize);
+            Py_SET_TYPE(op, tp);
+#ifdef Py_REF_DEBUG
+            _Py_IncRefTotal(ts);
+#endif
+            op->ob_refcnt = 1;
+            return op;
+        }
+    }
+    char *mem = PyObject_Malloc(size);
+    if (mem == NULL) {
+        return PyErr_NoMemory();
+    }
+    PyObject *op = (PyObject *)(PyObject *)(mem + presize);
+    _PyObject_Init(op, tp);
+    return op;
+}
+
 
 // Sets the heap used for PyObject_Malloc(), PyObject_Realloc(), etc. calls in
 // Py_GIL_DISABLED builds. We use different heaps depending on if the object

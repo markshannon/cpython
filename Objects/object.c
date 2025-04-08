@@ -20,6 +20,7 @@
 #include "pycore_memoryobject.h"  // _PyManagedBuffer_Type
 #include "pycore_namespace.h"     // _PyNamespace_Type
 #include "pycore_object.h"        // export _Py_SwappedOp
+#include "pycore_object_alloc.h"  // _PyObject_NewTstate
 #include "pycore_optimizer.h"     // _PyUOpExecutor_Type
 #include "pycore_pyerrors.h"      // _PyErr_Occurred()
 #include "pycore_pymem.h"         // _PyMem_IsPtrFreed()
@@ -547,12 +548,7 @@ PyObject_InitVar(PyVarObject *op, PyTypeObject *tp, Py_ssize_t size)
 PyObject *
 _PyObject_New(PyTypeObject *tp)
 {
-    PyObject *op = (PyObject *) PyObject_Malloc(_PyObject_SIZE(tp));
-    if (op == NULL) {
-        return PyErr_NoMemory();
-    }
-    _PyObject_Init(op, tp);
-    return op;
+    return _PyObject_NewTstate(_PyThreadState_GET(), tp, 0, _PyObject_SIZE(tp));
 }
 
 PyVarObject *
