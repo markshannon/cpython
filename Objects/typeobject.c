@@ -8284,6 +8284,9 @@ static int add_tp_new_wrapper(PyTypeObject *type);
 
 #define COLLECTION_FLAGS (Py_TPFLAGS_SEQUENCE | Py_TPFLAGS_MAPPING)
 
+extern void
+_Py_tp_dealloc_wrapper(PyThreadState *ts, PyObject *op);
+
 static int
 type_ready_pre_checks(PyTypeObject *type)
 {
@@ -8299,6 +8302,9 @@ type_ready_pre_checks(PyTypeObject *type)
     if (type->tp_flags & Py_TPFLAGS_HAVE_VECTORCALL) {
         _PyObject_ASSERT((PyObject *)type, type->tp_vectorcall_offset > 0);
         _PyObject_ASSERT((PyObject *)type, type->tp_call != NULL);
+    }
+    if (type->tp_dealloc_ex == NULL) {
+        type->tp_dealloc_ex = _Py_tp_dealloc_wrapper;
     }
 
     /* Consistency checks for pattern matching

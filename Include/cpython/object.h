@@ -229,6 +229,9 @@ struct _typeobject {
 
     destructor tp_finalize;
     vectorcallfunc tp_vectorcall;
+    destructor_ex tp_dealloc_ex;
+
+    /* Do not initialize below here. For internal use only */
 
     /* bitset of which type-watchers care about this type */
     unsigned char tp_watched;
@@ -504,6 +507,19 @@ do { \
         _PyTrash_thread_destroy_chain(tstate); \
     } \
 } while (0);
+
+#define Py_TRASHCAN_BEGIN_TSTATE(tstate, op, dealloc) \
+do { \
+    if (_Py_ReachedRecursionLimitWithMargin(tstate, 2) && Py_TYPE(op)->tp_dealloc_ex == (destructor_ex)dealloc) { \
+        _PyTrash_thread_deposit_object(tstate, (PyObject *)op); \
+        break; \
+    }
+    /* The body of the deallocator is here. */
+#define Py_TRASHCAN_END_TSTATE(tstate) \
+    if (tstate->delete_later && !_Py_ReachedRecursionLimitWithMargin(tstate, 4)) { \
+        _PyTrash_thread_destroy_chain(tstate); \
+    } \
+} while (0)
 
 
 PyAPI_FUNC(void *) PyObject_GetItemData(PyObject *obj);

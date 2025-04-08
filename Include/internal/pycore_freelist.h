@@ -29,9 +29,27 @@ _Py_freelists_GET(void)
 #endif
 }
 
+static inline struct _Py_freelists *
+_Py_freelists_GET_TS(PyThreadState *tstate)
+{
+#ifdef Py_DEBUG
+    _Py_EnsureTstateNotNULL(tstate);
+#endif
+
+#ifdef Py_GIL_DISABLED
+    return &((_PyThreadStateImpl*)tstate)->freelists;
+#else
+    return &tstate->interp->object_state.freelists;
+#endif
+}
+
 // Pushes `op` to the freelist, calls `freefunc` if the freelist is full
 #define _Py_FREELIST_FREE(NAME, op, freefunc) \
     _PyFreeList_Free(&_Py_freelists_GET()->NAME, _PyObject_CAST(op), freefunc)
+
+// Pushes `op` to the freelist, calls `freefunc` if the freelist is full
+#define _Py_FREELIST_FREE_TSTATE(TS, NAME, op, freefunc) \
+    _PyFreeList_Free(&_Py_freelists_GET_TS(TS)->NAME, _PyObject_CAST(op), freefunc)
 
 // Pushes `op` to the freelist, returns 1 if successful, 0 if the freelist is full
 #define _Py_FREELIST_PUSH(NAME, op) \

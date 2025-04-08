@@ -1706,7 +1706,7 @@ find_maxchar_surrogates(const wchar_t *begin, const wchar_t *end,
 }
 
 static void
-unicode_dealloc(PyObject *unicode)
+unicode_dealloc(PyThreadState *tstate, PyObject *unicode)
 {
 #ifdef Py_DEBUG
     if (!unicode_is_finalizing() && unicode_is_singleton(unicode)) {
@@ -15543,7 +15543,7 @@ void
 _PyUnicode_ExactDealloc(PyObject *op)
 {
     assert(PyUnicode_CheckExact(op));
-    unicode_dealloc(op);
+    unicode_dealloc(PyThreadState_GET(), op);
 }
 
 PyDoc_STRVAR(unicode_doc,
@@ -15566,7 +15566,7 @@ PyTypeObject PyUnicode_Type = {
     sizeof(PyUnicodeObject),      /* tp_basicsize */
     0,                            /* tp_itemsize */
     /* Slots */
-    unicode_dealloc,              /* tp_dealloc */
+    0,                            /* tp_dealloc */
     0,                            /* tp_vectorcall_offset */
     0,                            /* tp_getattr */
     0,                            /* tp_setattr */
@@ -15604,6 +15604,7 @@ PyTypeObject PyUnicode_Type = {
     unicode_new,                  /* tp_new */
     PyObject_Free,                /* tp_free */
     .tp_vectorcall = unicode_vectorcall,
+    .tp_dealloc_ex = unicode_dealloc,
 };
 
 /* Initialize the Unicode implementation */

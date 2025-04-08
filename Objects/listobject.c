@@ -545,12 +545,12 @@ PyList_Append(PyObject *op, PyObject *newitem)
 /* Methods */
 
 static void
-list_dealloc(PyObject *self)
+list_dealloc(PyThreadState *tstate, PyObject *self)
 {
     PyListObject *op = (PyListObject *)self;
     Py_ssize_t i;
     PyObject_GC_UnTrack(op);
-    Py_TRASHCAN_BEGIN(op, list_dealloc)
+    Py_TRASHCAN_BEGIN_TSTATE(tstate, op, list_dealloc)
     if (op->ob_item != NULL) {
         /* Do it backwards, for Christian Tismer.
            There's a simple test case where somehow this reduces
@@ -564,12 +564,12 @@ list_dealloc(PyObject *self)
         op->ob_item = NULL;
     }
     if (PyList_CheckExact(op)) {
-        _Py_FREELIST_FREE(lists, op, PyObject_GC_Del);
+        _Py_FREELIST_FREE_TSTATE(tstate, lists, op, PyObject_GC_Del);
     }
     else {
         PyObject_GC_Del(op);
     }
-    Py_TRASHCAN_END
+    Py_TRASHCAN_END_TSTATE(tstate);
 }
 
 static PyObject *
@@ -3840,7 +3840,7 @@ PyTypeObject PyList_Type = {
     "list",
     sizeof(PyListObject),
     0,
-    list_dealloc,                               /* tp_dealloc */
+    0,                                          /* tp_dealloc */
     0,                                          /* tp_vectorcall_offset */
     0,                                          /* tp_getattr */
     0,                                          /* tp_setattr */
@@ -3879,6 +3879,7 @@ PyTypeObject PyList_Type = {
     PyObject_GC_Del,                            /* tp_free */
     .tp_vectorcall = list_vectorcall,
     .tp_version_tag = _Py_TYPE_VERSION_LIST,
+    .tp_dealloc_ex = list_dealloc
 };
 
 /*********************** List Iterator **************************/

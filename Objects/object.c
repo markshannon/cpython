@@ -2515,11 +2515,23 @@ static PyTypeObject* static_types[] = {
     &PyODict_Type,        // base=&PyDict_Type
 };
 
+void
+_Py_tp_dealloc_wrapper(PyThreadState *ts, PyObject *op)
+{
+    _PyReftracerTrack(op, PyRefTracer_DESTROY);
+    Py_TYPE(op)->tp_dealloc(op);
+}
 
 PyStatus
 _PyTypes_InitTypes(PyInterpreterState *interp)
 {
     // All other static types (unless initialized elsewhere)
+    for (size_t i=0; i < Py_ARRAY_LENGTH(static_types); i++) {
+        PyTypeObject *type = static_types[i];
+        if (type->tp_dealloc_ex == NULL) {
+            type->tp_dealloc_ex = _Py_tp_dealloc_wrapper;
+        }
+    }
     for (size_t i=0; i < Py_ARRAY_LENGTH(static_types); i++) {
         PyTypeObject *type = static_types[i];
         if (_PyStaticType_InitBuiltin(interp, type) < 0) {
@@ -3073,14 +3085,12 @@ _PyObject_AssertFailed(PyObject *obj, const char *expr, const char *msg,
     Py_FatalError("_PyObject_AssertFailed");
 }
 
-
 void
-_Py_Dealloc(PyObject *op)
+_Py_DeallocTstate(PyThreadState *tstate, PyObject *op)
 {
     PyTypeObject *type = Py_TYPE(op);
-    destructor dealloc = type->tp_dealloc;
+    destructor_ex dealloc = type->tp_dealloc_ex;
 #ifdef Py_DEBUG
-    PyThreadState *tstate = _PyThreadState_GET();
 #if !defined(Py_GIL_DISABLED) && !defined(Py_STACKREF_DEBUG)
     /* This assertion doesn't hold for the free-threading build, as
      * PyStackRef_CLOSE_SPECIALIZED is not implemented */
@@ -3098,7 +3108,7 @@ _Py_Dealloc(PyObject *op)
     _Py_ForgetReference(op);
 #endif
     _PyReftracerTrack(op, PyRefTracer_DESTROY);
-    (*dealloc)(op);
+    (*dealloc)(tstate, op);
 
 #ifdef Py_DEBUG
     // gh-89373: The tp_dealloc function must leave the current exception
@@ -3124,6 +3134,11 @@ _Py_Dealloc(PyObject *op)
 #endif
 }
 
+void
+_Py_Dealloc(PyObject *op)
+{
+    _Py_DeallocTstate(_PyThreadState_GET(), op);
+}
 
 PyObject **
 PyObject_GET_WEAKREFS_LISTPTR(PyObject *op)
