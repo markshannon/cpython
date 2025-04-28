@@ -929,6 +929,100 @@ _PyObjectArray_Free(PyObject **array, PyObject **scratch)
     }
 }
 
+int
+_Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args, PyObject *kwargs)
+{
+    if (cont->root_frame != NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "Continuation has already been started");
+        return -1;
+    }
+    if (!PyTuple_CheckExact(args)) {
+        PyErr_SetString(PyExc_TypeError, "args must be a tuple");
+        return -1;
+    }
+    if (kwargs != NULL && !PyDict_CheckExact(kwargs)) {
+        PyErr_SetString(PyExc_TypeError, "kwargs must be a dict");
+        return -1;
+    }
+    PyThreadState *tstate = PyThreadState_GET();
+    _PyFrameStack temp = tstate->stack;
+    tstate->stack = cont->stack;
+    Py_INCREF(args);
+    Py_XINCREF(kwargs);
+    _PyStackRef func_st = PyStackRef_FromPyObjectNew(func);
+    Py_ssize_t nargs = PyTuple_GET_SIZE(args);
+    _PyInterpreterFrame *new_frame = _PyEvalFramePushAndInit_Ex(
+                        tstate, func_st, NULL,
+                        nargs, args, kwargs, NULL);
+    cont->stack = tstate->stack;
+    tstate->stack = temp;
+    assert(cont->stack.datastack_chunk != NULL);
+    if (new_frame == NULL) {
+        return -1;
+    }
+    cont->root_frame = new_frame;
+    return 0;
+}
+
+static int
+resume_continuation(PyThreadState *tstate, PyObject *continuation, _PyInterpreterFrame *entry_frame)
+{
+    // TO DO -- Check that continuation is actually a Continuation.
+    // if (Py_TYPE(continuation) != &PyContinuation_Type) {
+    //     PyErr_SetString(PyExc_TypeError, "Expected a continuation");
+    //     return -1;
+    // }
+    PyContinuationObject *cont = (PyContinuationObject *)continuation;
+    assert(cont->root_frame != NULL);
+    PyContinuationObject *prev = tstate->current_continuation;
+    if (prev == NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "Cannot resume a continuation from outside a continuation");
+        return -1;
+    }
+    if (prev->root_frame->previous != entry_frame) {
+        PyErr_SetString(PyExc_RuntimeError, "Cannot resume continuation across builtin function call");
+        return -1;
+    }
+    Py_INCREF(cont);
+    prev->root_frame->previous = NULL;
+    cont->root_frame->previous = entry_frame;
+    prev->stack = tstate->stack;
+    prev->current_frame = tstate->current_frame;
+    tstate->current_continuation = cont;
+    tstate->current_frame = cont->current_frame;
+    Py_DECREF(prev);
+    tstate->stack = cont->stack;
+    return 0;
+}
+
+
+PyObject *
+_Py_StartContinuation(PyThreadState *tstate, PyObject *continuation)
+{
+    // TO DO -- Check that continuation is actually a Continuation.
+    // if (Py_TYPE(continuation) != &PyContinuation_Type) {
+    //     PyErr_SetString(PyExc_TypeError, "Expected a continuation");
+    //     return -1;
+    // }
+    PyContinuationObject *cont = (PyContinuationObject *)continuation;
+    assert(cont->root_frame != NULL);
+    PyContinuationObject *prev = tstate->current_continuation;
+    if (prev != NULL) {
+        PyErr_SetString(PyExc_RuntimeError, "Cannot start a continuation from within a continuation");
+    }
+    _PyFrameStack stack = tstate->stack;
+    tstate->stack = cont->stack;
+    Py_INCREF(cont);
+    tstate->current_continuation = cont;
+    PyObject *result = _PyEval_EvalFrame(tstate, cont->root_frame, 0);
+    prev = tstate->current_continuation;
+    prev->stack = tstate->stack;
+    tstate->current_continuation = NULL;
+    Py_DECREF(prev);
+    tstate->stack = stack;
+    return result;
+}
+
 
 /* _PyEval_EvalFrameDefault is too large to optimize for speed with PGO on MSVC.
  */
@@ -965,7 +1059,8 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
 #if !Py_TAIL_CALL_INTERP
     uint8_t opcode;    /* Current opcode */
     int oparg;         /* Current opcode argument, if any */
-    assert(tstate->current_frame == NULL || tstate->current_frame->stackpointer != NULL);
+    assert(tstate->current_frame == NULL ||
+        tstate->current_frame->stackpointer != NULL);
 #endif
     _PyInterpreterFrame entry_frame;
 
@@ -1722,7 +1817,7 @@ clear_thread_frame(PyThreadState *tstate, _PyInterpreterFrame * frame)
     // Make sure that this is, indeed, the top frame. We can't check this in
     // _PyThreadState_PopFrame, since f_code is already cleared at that point:
     assert((PyObject **)frame + _PyFrame_GetCode(frame)->co_framesize ==
-        tstate->datastack_top);
+        tstate->stack.datastack_top);
     assert(frame->frame_obj == NULL || frame->frame_obj->f_frame == frame);
     _PyFrame_ClearExceptCode(frame);
     PyStackRef_CLEAR(frame->f_executable);

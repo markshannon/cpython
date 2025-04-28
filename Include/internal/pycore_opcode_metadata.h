@@ -385,6 +385,8 @@ int _PyOpcode_num_popped(int opcode, int oparg)  {
             return 0;
         case NOT_TAKEN:
             return 0;
+        case PAUSE_CONTINUATION:
+            return 0;
         case POP_BLOCK:
             return 0;
         case POP_EXCEPT:
@@ -415,6 +417,8 @@ int _PyOpcode_num_popped(int opcode, int oparg)  {
             return 0;
         case RESUME_CHECK:
             return 0;
+        case RESUME_CONTINUATION:
+            return 2;
         case RETURN_GENERATOR:
             return 0;
         case RETURN_VALUE:
@@ -864,6 +868,8 @@ int _PyOpcode_num_pushed(int opcode, int oparg)  {
             return 0;
         case NOT_TAKEN:
             return 0;
+        case PAUSE_CONTINUATION:
+            return 0;
         case POP_BLOCK:
             return 0;
         case POP_EXCEPT:
@@ -894,6 +900,8 @@ int _PyOpcode_num_pushed(int opcode, int oparg)  {
             return 0;
         case RESUME_CHECK:
             return 0;
+        case RESUME_CONTINUATION:
+            return 1;
         case RETURN_GENERATOR:
             return 1;
         case RETURN_VALUE:
@@ -1231,6 +1239,7 @@ const struct opcode_metadata _PyOpcode_opcode_metadata[266] = {
     [MATCH_SEQUENCE] = { true, INSTR_FMT_IX, 0 },
     [NOP] = { true, INSTR_FMT_IX, HAS_PURE_FLAG },
     [NOT_TAKEN] = { true, INSTR_FMT_IX, HAS_PURE_FLAG },
+    [PAUSE_CONTINUATION] = { true, INSTR_FMT_IX, 0 },
     [POP_EXCEPT] = { true, INSTR_FMT_IX, HAS_ESCAPES_FLAG },
     [POP_ITER] = { true, INSTR_FMT_IX, HAS_ESCAPES_FLAG | HAS_PURE_FLAG },
     [POP_JUMP_IF_FALSE] = { true, INSTR_FMT_IBC, HAS_ARG_FLAG | HAS_JUMP_FLAG },
@@ -1245,6 +1254,7 @@ const struct opcode_metadata _PyOpcode_opcode_metadata[266] = {
     [RESERVED] = { true, INSTR_FMT_IX, 0 },
     [RESUME] = { true, INSTR_FMT_IB, HAS_ARG_FLAG | HAS_EVAL_BREAK_FLAG | HAS_ERROR_FLAG | HAS_ERROR_NO_POP_FLAG | HAS_ESCAPES_FLAG },
     [RESUME_CHECK] = { true, INSTR_FMT_IX, HAS_DEOPT_FLAG },
+    [RESUME_CONTINUATION] = { true, INSTR_FMT_IX, HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
     [RETURN_GENERATOR] = { true, INSTR_FMT_IX, HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
     [RETURN_VALUE] = { true, INSTR_FMT_IX, HAS_ESCAPES_FLAG },
     [SEND] = { true, INSTR_FMT_IBC, HAS_ARG_FLAG | HAS_JUMP_FLAG | HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
@@ -1669,6 +1679,7 @@ const char *_PyOpcode_OpName[266] = {
     [MATCH_SEQUENCE] = "MATCH_SEQUENCE",
     [NOP] = "NOP",
     [NOT_TAKEN] = "NOT_TAKEN",
+    [PAUSE_CONTINUATION] = "PAUSE_CONTINUATION",
     [POP_BLOCK] = "POP_BLOCK",
     [POP_EXCEPT] = "POP_EXCEPT",
     [POP_ITER] = "POP_ITER",
@@ -1684,6 +1695,7 @@ const char *_PyOpcode_OpName[266] = {
     [RESERVED] = "RESERVED",
     [RESUME] = "RESUME",
     [RESUME_CHECK] = "RESUME_CHECK",
+    [RESUME_CONTINUATION] = "RESUME_CONTINUATION",
     [RETURN_GENERATOR] = "RETURN_GENERATOR",
     [RETURN_VALUE] = "RETURN_VALUE",
     [SEND] = "SEND",
@@ -1929,6 +1941,7 @@ const uint8_t _PyOpcode_Deopt[256] = {
     [MATCH_SEQUENCE] = MATCH_SEQUENCE,
     [NOP] = NOP,
     [NOT_TAKEN] = NOT_TAKEN,
+    [PAUSE_CONTINUATION] = PAUSE_CONTINUATION,
     [POP_EXCEPT] = POP_EXCEPT,
     [POP_ITER] = POP_ITER,
     [POP_JUMP_IF_FALSE] = POP_JUMP_IF_FALSE,
@@ -1943,6 +1956,7 @@ const uint8_t _PyOpcode_Deopt[256] = {
     [RESERVED] = RESERVED,
     [RESUME] = RESUME,
     [RESUME_CHECK] = RESUME,
+    [RESUME_CONTINUATION] = RESUME_CONTINUATION,
     [RETURN_GENERATOR] = RETURN_GENERATOR,
     [RETURN_VALUE] = RETURN_VALUE,
     [SEND] = SEND,
@@ -1988,8 +2002,6 @@ const uint8_t _PyOpcode_Deopt[256] = {
 #endif // NEED_OPCODE_METADATA
 
 #define EXTRA_CASES \
-    case 119: \
-    case 120: \
     case 121: \
     case 122: \
     case 123: \

@@ -275,6 +275,10 @@ Known values:
     Python 3.14a6 3620 (Optimize bytecode for all/any/tuple called on a genexp)
     Python 3.14a7 3621 (Optimize LOAD_FAST opcodes into LOAD_FAST_BORROW)
 
+
+
+    Python 3.15a1 3651 (Continuations)
+
     Python 3.15 will start with 3650
 
     Please don't copy-paste the same pre-release tag for new entries above!!!
@@ -286,7 +290,7 @@ PC/launcher.c must also be updated.
 
 */
 
-#define PYC_MAGIC_NUMBER 3621
+#define PYC_MAGIC_NUMBER 3651
 /* This is equivalent to converting PYC_MAGIC_NUMBER to 2 bytes
    (little-endian) and then appending b'\r\n'. */
 #define PYC_MAGIC_NUMBER_TOKEN \

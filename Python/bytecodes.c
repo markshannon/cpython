@@ -5025,6 +5025,37 @@ dummy_func(
             }
         }
 
+        tier1 inst(RESUME_CONTINUATION, (cont, val -- res)) {
+            PyObject *continuation = PyStackRef_AsPyObjectSteal(cont);
+            DEAD(val);
+            SAVE_STACK();
+            frame->return_offset = INSTRUCTION_SIZE;
+            int err = resume_continuation(tstate, continuation, &entry_frame);
+            Py_DECREF(continuation);
+            if (err < 0) {
+                RELOAD_STACK();
+                PyStackRef_CLOSE(val);
+                ERROR_IF(true, error);
+            }
+            frame = tstate->current_frame;
+            RELOAD_STACK();
+            res = val;
+            LOAD_IP(frame->return_offset);
+            LLTRACE_RESUME_FRAME();
+        }
+
+        tier1 inst(PAUSE_CONTINUATION, ( -- )) {
+            frame->return_offset = INSTRUCTION_SIZE;
+            tstate->current_continuation->current_frame = frame;
+            _PyFrame_StackPush(&entry_frame, PyStackRef_None);
+            SAVE_STACK();
+            frame = &entry_frame;
+            RELOAD_STACK();
+            tstate->current_continuation->root_frame->previous = NULL;
+            LOAD_IP(frame->return_offset);
+            LLTRACE_RESUME_FRAME();
+        }
+
         tier1 inst(EXTENDED_ARG, ( -- )) {
             assert(oparg);
             opcode = next_instr->op.code;

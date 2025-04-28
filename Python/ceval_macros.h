@@ -353,7 +353,7 @@ do {                                                   \
     next_instr = jitted(frame, stack_pointer, tstate); \
     Py_DECREF(_executor);                              \
     Py_CLEAR(tstate->previous_executor);               \
-    frame = tstate->current_frame;                     \
+    frame = tstate->current_frame;               \
     stack_pointer = _PyFrame_GetStackPointer(frame);   \
     if (next_instr == NULL) {                          \
         next_instr = frame->instr_ptr;                 \

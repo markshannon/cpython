@@ -254,7 +254,7 @@ typedef struct _Py_DebugOffsets {
         .current_frame = offsetof(PyThreadState, current_frame), \
         .thread_id = offsetof(PyThreadState, thread_id), \
         .native_thread_id = offsetof(PyThreadState, native_thread_id), \
-        .datastack_chunk = offsetof(PyThreadState, datastack_chunk), \
+        .datastack_chunk = offsetof(PyThreadState, stack.datastack_chunk), \
         .status = offsetof(PyThreadState, _status), \
     }, \
     .interpreter_frame = { \

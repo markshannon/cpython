@@ -3973,6 +3973,7 @@ error:
 }
 
 PyObject *_Py_CreateMonitoringObject(void);
+PyTypeObject *PyContinuation_MakeType(PyObject *module);
 
 /* Create sys module without all attributes.
    _PySys_UpdateConfig() should be called later to add remaining attributes. */

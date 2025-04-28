@@ -63,6 +63,25 @@ typedef struct _stack_chunk {
     PyObject * data[1]; /* Variable sized */
 } _PyStackChunk;
 
+typedef struct _py_frame_stack{
+    _PyStackChunk *datastack_chunk;
+    PyObject **datastack_top;
+    PyObject **datastack_limit;
+
+} _PyFrameStack;
+
+typedef struct _continuation {
+    PyObject_HEAD
+    uint64_t id;
+    _PyFrameStack stack;
+    struct _PyInterpreterFrame *current_frame;
+    struct _PyInterpreterFrame *root_frame;
+    _PyErr_StackItem *exc_info;
+    _PyErr_StackItem *root_exc_info;
+    PyObject *cont_weakreflist;
+    int executing;
+} PyContinuationObject;
+
 struct _ts {
     /* See Python/ceval.c for comments explaining most fields */
 
@@ -130,9 +149,6 @@ struct _ts {
     int tracing;
     int what_event; /* The event currently being monitored, if any. */
 
-    /* Pointer to currently executing frame. */
-    struct _PyInterpreterFrame *current_frame;
-
     Py_tracefunc c_profilefunc;
     Py_tracefunc c_tracefunc;
     PyObject *c_profileobj;
@@ -140,11 +156,6 @@ struct _ts {
 
     /* The exception currently being raised */
     PyObject *current_exception;
-
-    /* Pointer to the top of the exception stack for the exceptions
-     * we may be currently handling.  (See _PyErr_StackItem above.)
-     * This is never NULL. */
-    _PyErr_StackItem *exc_info;
 
     PyObject *dict;  /* Stores per-thread state */
 
@@ -179,9 +190,18 @@ struct _ts {
     /* Unique thread state id. */
     uint64_t id;
 
-    _PyStackChunk *datastack_chunk;
-    PyObject **datastack_top;
-    PyObject **datastack_limit;
+    /* Pointer to currently executing frame. */
+    struct _PyInterpreterFrame *current_frame;
+
+    _PyFrameStack stack;
+
+    /* Pointer to the top of the exception stack for the exceptions
+     * we may be currently handling.  (See _PyErr_StackItem above.)
+     * This is never NULL. */
+    _PyErr_StackItem *exc_info;
+
+    PyContinuationObject *current_continuation;
+
     /* XXX signal handlers should also be here */
 
     /* The following fields are here to avoid allocation during init.

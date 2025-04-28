@@ -9818,6 +9818,26 @@
             DISPATCH();
         }
 
+        TARGET(PAUSE_CONTINUATION) {
+            #if Py_TAIL_CALL_INTERP
+            int opcode = PAUSE_CONTINUATION;
+            (void)(opcode);
+            #endif
+            frame->instr_ptr = next_instr;
+            next_instr += 1;
+            INSTRUCTION_STATS(PAUSE_CONTINUATION);
+            frame->return_offset = 1 ;
+            tstate->current_continuation->current_frame = frame;
+            _PyFrame_StackPush(&entry_frame, PyStackRef_None);
+            _PyFrame_SetStackPointer(frame, stack_pointer);
+            frame = &entry_frame;
+            stack_pointer = _PyFrame_GetStackPointer(frame);
+            tstate->current_continuation->root_frame->previous = NULL;
+            LOAD_IP(frame->return_offset);
+            LLTRACE_RESUME_FRAME();
+            DISPATCH();
+        }
+
         TARGET(POP_EXCEPT) {
             #if Py_TAIL_CALL_INTERP
             int opcode = POP_EXCEPT;
@@ -10242,6 +10262,42 @@
                 JUMP_TO_PREDICTED(RESUME);
             }
             #endif
+            DISPATCH();
+        }
+
+        TARGET(RESUME_CONTINUATION) {
+            #if Py_TAIL_CALL_INTERP
+            int opcode = RESUME_CONTINUATION;
+            (void)(opcode);
+            #endif
+            frame->instr_ptr = next_instr;
+            next_instr += 1;
+            INSTRUCTION_STATS(RESUME_CONTINUATION);
+            _PyStackRef cont;
+            _PyStackRef val;
+            _PyStackRef res;
+            val = stack_pointer[-1];
+            cont = stack_pointer[-2];
+            PyObject *continuation = PyStackRef_AsPyObjectSteal(cont);
+            stack_pointer += -2;
+            assert(WITHIN_STACK_BOUNDS());
+            _PyFrame_SetStackPointer(frame, stack_pointer);
+            frame->return_offset = 1 ;
+            int err = resume_continuation(tstate, continuation, &entry_frame);
+            Py_DECREF(continuation);
+            if (err < 0) {
+                PyStackRef_CLOSE(val);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
+                JUMP_TO_LABEL(error);
+            }
+            frame = tstate->current_frame;
+            stack_pointer = _PyFrame_GetStackPointer(frame);
+            res = val;
+            LOAD_IP(frame->return_offset);
+            LLTRACE_RESUME_FRAME();
+            stack_pointer[0] = res;
+            stack_pointer += 1;
+            assert(WITHIN_STACK_BOUNDS());
             DISPATCH();
         }
 

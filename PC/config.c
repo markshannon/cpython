@@ -137,6 +137,7 @@ struct _inittab _PyImport_Inittab[] = {
     {"_lsprof", PyInit__lsprof},
     {"itertools", PyInit_itertools},
     {"_collections", PyInit__collections},
+    {"_continuations", PyInit__continuations},
     {"_symtable", PyInit__symtable},
 #if defined(MS_WINDOWS_DESKTOP) || defined(MS_WINDOWS_GAMES)
     {"mmap", PyInit_mmap},
