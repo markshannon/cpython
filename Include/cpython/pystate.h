@@ -63,17 +63,11 @@ typedef struct _stack_chunk {
     PyObject * data[1]; /* Variable sized */
 } _PyStackChunk;
 
-typedef struct _py_frame_stack{
-    _PyStackChunk *datastack_chunk;
-    PyObject **datastack_top;
-    PyObject **datastack_limit;
-
-} _PyFrameStack;
-
 typedef struct _continuation {
     PyObject_HEAD
     uint64_t id;
-    _PyFrameStack stack;
+    _PyStackChunk *top_chunk;
+    _PyStackChunk *root_chunk;
     struct _PyInterpreterFrame *current_frame;
     struct _PyInterpreterFrame *root_frame;
     _PyErr_StackItem *exc_info;
@@ -193,7 +187,9 @@ struct _ts {
     /* Pointer to currently executing frame. */
     struct _PyInterpreterFrame *current_frame;
 
-    _PyFrameStack stack;
+    _PyStackChunk *datastack_chunk;
+    PyObject **datastack_top;
+    PyObject **datastack_limit;
 
     /* Pointer to the top of the exception stack for the exceptions
      * we may be currently handling.  (See _PyErr_StackItem above.)

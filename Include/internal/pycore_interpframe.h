@@ -269,12 +269,12 @@ static inline bool
 _PyThreadState_HasStackSpace(PyThreadState *tstate, int size)
 {
     assert(
-        (tstate->stack.datastack_top == NULL && tstate->stack.datastack_limit == NULL)
+        (tstate->datastack_top == NULL && tstate->datastack_limit == NULL)
         ||
-        (tstate->stack.datastack_top != NULL && tstate->stack.datastack_limit != NULL)
+        (tstate->datastack_top != NULL && tstate->datastack_limit != NULL)
     );
-    return tstate->stack.datastack_top != NULL &&
-        size < tstate->stack.datastack_limit - tstate->stack.datastack_top;
+    return tstate->datastack_top != NULL &&
+        size < tstate->datastack_limit - tstate->datastack_top;
 }
 
 extern _PyInterpreterFrame *
@@ -291,9 +291,9 @@ _PyFrame_PushUnchecked(PyThreadState *tstate, _PyStackRef func, int null_locals_
     CALL_STAT_INC(frames_pushed);
     PyFunctionObject *func_obj = (PyFunctionObject *)PyStackRef_AsPyObjectBorrow(func);
     PyCodeObject *code = (PyCodeObject *)func_obj->func_code;
-    _PyInterpreterFrame *new_frame = (_PyInterpreterFrame *)tstate->stack.datastack_top;
-    tstate->stack.datastack_top += code->co_framesize;
-    assert(tstate->stack.datastack_top < tstate->stack.datastack_limit);
+    _PyInterpreterFrame *new_frame = (_PyInterpreterFrame *)tstate->datastack_top;
+    tstate->datastack_top += code->co_framesize;
+    assert(tstate->datastack_top < tstate->datastack_limit);
     _PyFrame_Initialize(tstate, new_frame, func, NULL, code, null_locals_from,
                         previous);
     return new_frame;
@@ -305,9 +305,9 @@ static inline _PyInterpreterFrame *
 _PyFrame_PushTrampolineUnchecked(PyThreadState *tstate, PyCodeObject *code, int stackdepth, _PyInterpreterFrame * previous)
 {
     CALL_STAT_INC(frames_pushed);
-    _PyInterpreterFrame *frame = (_PyInterpreterFrame *)tstate->stack.datastack_top;
-    tstate->stack.datastack_top += code->co_framesize;
-    assert(tstate->stack.datastack_top < tstate->stack.datastack_limit);
+    _PyInterpreterFrame *frame = (_PyInterpreterFrame *)tstate->datastack_top;
+    tstate->datastack_top += code->co_framesize;
+    assert(tstate->datastack_top < tstate->datastack_limit);
     frame->previous = previous;
     frame->f_funcobj = PyStackRef_None;
     frame->f_executable = PyStackRef_FromPyObjectNew(code);

@@ -929,6 +929,47 @@ _PyObjectArray_Free(PyObject **array, PyObject **scratch)
     }
 }
 
+static void
+set_stack_chunk(PyThreadState *tstate, _PyStackChunk *chunk)
+{
+    assert(tstate->datastack_chunk != NULL);
+    // Save top
+    tstate->datastack_chunk->top = tstate->datastack_top -
+                                    &tstate->datastack_chunk->data[0];
+    assert(tstate->datastack_chunk->size == (uintptr_t)(((char *)tstate->datastack_limit) - ((char *)tstate->datastack_chunk)));
+    tstate->datastack_chunk = chunk;
+    assert(chunk != NULL);
+    tstate->datastack_top = &chunk->data[chunk->top];
+    tstate->datastack_limit = (PyObject **)(((char *)chunk) + chunk->size);
+}
+
+static void
+attach(PyThreadState *tstate, PyContinuationObject *cont)
+{
+
+    assert(tstate->current_continuation == NULL);
+    cont->root_frame->previous = tstate->current_frame;
+    tstate->current_frame = cont->current_frame;
+    tstate->current_continuation = cont;
+    cont->root_chunk->previous = tstate->datastack_chunk;
+    set_stack_chunk(tstate, cont->top_chunk);
+}
+
+static void
+detach(PyThreadState *tstate, PyContinuationObject *cont, _PyInterpreterFrame *current)
+{
+    cont->top_chunk = tstate->datastack_chunk;
+    set_stack_chunk(tstate, cont->root_chunk->previous);
+    cont->root_chunk->previous = NULL;
+    cont->current_frame = tstate->current_frame;
+    tstate->current_frame = cont->root_frame->previous;
+    cont->root_frame->previous = NULL;
+    tstate->current_continuation = NULL;
+}
+
+extern _PyStackChunk*
+_Py_PushChunk(PyThreadState *tstate,  size_t size);
+
 int
 _Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args, PyObject *kwargs)
 {
@@ -945,8 +986,17 @@ _Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args,
         return -1;
     }
     PyThreadState *tstate = PyThreadState_GET();
-    _PyFrameStack temp = tstate->stack;
-    tstate->stack = cont->stack;
+    _PyStackChunk *temp = tstate->datastack_chunk;
+    PyFunctionObject *func_obj = (PyFunctionObject *)func;
+    PyCodeObject *code = (PyCodeObject *)func_obj->func_code;
+    _PyStackChunk *chunk = _Py_PushChunk(tstate, code->co_framesize);
+    if (chunk == NULL) {
+        PyErr_NoMemory();
+        return -1;
+    }
+    cont->top_chunk = cont->root_chunk = chunk;
+    tstate->current_continuation = cont;
+    assert(cont->root_chunk->previous == temp);
     Py_INCREF(args);
     Py_XINCREF(kwargs);
     _PyStackRef func_st = PyStackRef_FromPyObjectNew(func);
@@ -954,13 +1004,16 @@ _Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args,
     _PyInterpreterFrame *new_frame = _PyEvalFramePushAndInit_Ex(
                         tstate, func_st, NULL,
                         nargs, args, kwargs, NULL);
-    cont->stack = tstate->stack;
-    tstate->stack = temp;
-    assert(cont->stack.datastack_chunk != NULL);
+    cont->root_frame = new_frame;
+    detach(tstate, cont);
+    assert(cont->root_frame->previous == NULL);
+    assert(cont->root_chunk->previous == NULL);
+    assert(tstate->datastack_chunk == temp);
+    cont->current_frame = new_frame;
+    assert(cont->top_chunk != NULL);
     if (new_frame == NULL) {
         return -1;
     }
-    cont->root_frame = new_frame;
     return 0;
 }
 
@@ -984,14 +1037,9 @@ resume_continuation(PyThreadState *tstate, PyObject *continuation, _PyInterprete
         return -1;
     }
     Py_INCREF(cont);
-    prev->root_frame->previous = NULL;
-    cont->root_frame->previous = entry_frame;
-    prev->stack = tstate->stack;
-    prev->current_frame = tstate->current_frame;
-    tstate->current_continuation = cont;
-    tstate->current_frame = cont->current_frame;
+    detach(tstate, prev);
+    attach(tstate, cont);
     Py_DECREF(prev);
-    tstate->stack = cont->stack;
     return 0;
 }
 
@@ -1010,16 +1058,12 @@ _Py_StartContinuation(PyThreadState *tstate, PyObject *continuation)
     if (prev != NULL) {
         PyErr_SetString(PyExc_RuntimeError, "Cannot start a continuation from within a continuation");
     }
-    _PyFrameStack stack = tstate->stack;
-    tstate->stack = cont->stack;
     Py_INCREF(cont);
-    tstate->current_continuation = cont;
-    PyObject *result = _PyEval_EvalFrame(tstate, cont->root_frame, 0);
-    prev = tstate->current_continuation;
-    prev->stack = tstate->stack;
-    tstate->current_continuation = NULL;
-    Py_DECREF(prev);
-    tstate->stack = stack;
+    attach(tstate, cont);
+    PyObject *result = _PyEval_EvalFrame(tstate, cont->current_frame, 0);
+    assert(tstate->current_continuation == cont);
+    detach(tstate, cont);
+    Py_DECREF(cont);
     return result;
 }
 
@@ -1817,7 +1861,7 @@ clear_thread_frame(PyThreadState *tstate, _PyInterpreterFrame * frame)
     // Make sure that this is, indeed, the top frame. We can't check this in
     // _PyThreadState_PopFrame, since f_code is already cleared at that point:
     assert((PyObject **)frame + _PyFrame_GetCode(frame)->co_framesize ==
-        tstate->stack.datastack_top);
+        tstate->datastack_top);
     assert(frame->frame_obj == NULL || frame->frame_obj->f_frame == frame);
     _PyFrame_ClearExceptCode(frame);
     PyStackRef_CLEAR(frame->f_executable);

@@ -1530,9 +1530,9 @@ init_threadstate(_PyThreadStateImpl *_tstate,
     tstate->gilstate_counter = 1;
 
     tstate->current_frame = NULL;
-    tstate->stack.datastack_chunk = NULL;
-    tstate->stack.datastack_top = NULL;
-    tstate->stack.datastack_limit = NULL;
+    tstate->datastack_chunk = NULL;
+    tstate->datastack_top = NULL;
+    tstate->datastack_limit = NULL;
     tstate->what_event = -1;
     tstate->previous_executor = NULL;
     tstate->dict_global_version = 0;
@@ -1662,8 +1662,8 @@ _PyThreadState_Init(PyThreadState *tstate)
 static void
 clear_datastack(PyThreadState *tstate)
 {
-    _PyStackChunk *chunk = tstate->stack.datastack_chunk;
-    tstate->stack.datastack_chunk = NULL;
+    _PyStackChunk *chunk = tstate->datastack_chunk;
+    tstate->datastack_chunk = NULL;
     while (chunk != NULL) {
         _PyStackChunk *prev = chunk->previous;
         _PyObject_VirtualFree(chunk, chunk->size);
@@ -2959,28 +2959,38 @@ _PyInterpreterState_HasFeature(PyInterpreterState *interp, unsigned long feature
 
 #define MINIMUM_OVERHEAD 1000
 
-static PyObject **
-push_chunk(PyThreadState *tstate, int size)
+_PyStackChunk*
+_Py_PushChunk(PyThreadState *tstate,  size_t size)
 {
     int allocate_size = DATA_STACK_CHUNK_SIZE;
-    while (allocate_size < (int)sizeof(PyObject*)*(size + MINIMUM_OVERHEAD)) {
+    while (allocate_size < (int)(sizeof(PyObject*)*(size + MINIMUM_OVERHEAD))) {
         allocate_size *= 2;
     }
-    _PyStackChunk *new = allocate_chunk(allocate_size, tstate->stack.datastack_chunk);
+    _PyStackChunk *new = allocate_chunk(allocate_size, tstate->datastack_chunk);
     if (new == NULL) {
         return NULL;
     }
-    if (tstate->stack.datastack_chunk) {
-        tstate->stack.datastack_chunk->top = tstate->stack.datastack_top -
-                                       &tstate->stack.datastack_chunk->data[0];
+    if (tstate->datastack_chunk) {
+        tstate->datastack_chunk->top = tstate->datastack_top -
+                                       &tstate->datastack_chunk->data[0];
     }
-    tstate->stack.datastack_chunk = new;
-    tstate->stack.datastack_limit = (PyObject **)(((char *)new) + allocate_size);
+    tstate->datastack_chunk = new;
+    tstate->datastack_limit = (PyObject **)(((char *)new) + allocate_size);
+    return new;
+}
+
+static PyObject **
+push_chunk(PyThreadState *tstate, int size)
+{
+    _PyStackChunk *new = _Py_PushChunk(tstate, size);
+    if (new == NULL) {
+        return NULL;
+    }
     // When new is the "root" chunk (i.e. new->previous == NULL), we can keep
     // _PyThreadState_PopFrame from freeing it later by "skipping" over the
     // first element:
     PyObject **res = &new->data[new->previous == NULL];
-    tstate->stack.datastack_top = res + size;
+    tstate->datastack_top = res + size;
     return res;
 }
 
@@ -2989,8 +2999,8 @@ _PyThreadState_PushFrame(PyThreadState *tstate, size_t size)
 {
     assert(size < INT_MAX/sizeof(PyObject *));
     if (_PyThreadState_HasStackSpace(tstate, (int)size)) {
-        _PyInterpreterFrame *res = (_PyInterpreterFrame *)tstate->stack.datastack_top;
-        tstate->stack.datastack_top += size;
+        _PyInterpreterFrame *res = (_PyInterpreterFrame *)tstate->datastack_top;
+        tstate->datastack_top += size;
         return res;
     }
     return (_PyInterpreterFrame *)push_chunk(tstate, (int)size);
@@ -2999,22 +3009,22 @@ _PyThreadState_PushFrame(PyThreadState *tstate, size_t size)
 void
 _PyThreadState_PopFrame(PyThreadState *tstate, _PyInterpreterFrame * frame)
 {
-    assert(tstate->stack.datastack_chunk);
+    assert(tstate->datastack_chunk);
     PyObject **base = (PyObject **)frame;
-    if (base == &tstate->stack.datastack_chunk->data[0]) {
-        _PyStackChunk *chunk = tstate->stack.datastack_chunk;
+    if (base == &tstate->datastack_chunk->data[0]) {
+        _PyStackChunk *chunk = tstate->datastack_chunk;
         _PyStackChunk *previous = chunk->previous;
         // push_chunk ensures that the root chunk is never popped:
         assert(previous);
-        tstate->stack.datastack_top = &previous->data[previous->top];
-        tstate->stack.datastack_chunk = previous;
+        tstate->datastack_top = &previous->data[previous->top];
+        tstate->datastack_chunk = previous;
         _PyObject_VirtualFree(chunk, chunk->size);
-        tstate->stack.datastack_limit = (PyObject **)(((char *)previous) + previous->size);
+        tstate->datastack_limit = (PyObject **)(((char *)previous) + previous->size);
     }
     else {
-        assert(tstate->stack.datastack_top);
-        assert(tstate->stack.datastack_top >= base);
-        tstate->stack.datastack_top = base;
+        assert(tstate->datastack_top);
+        assert(tstate->datastack_top >= base);
+        tstate->datastack_top = base;
     }
 }
 

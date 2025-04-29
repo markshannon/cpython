@@ -83,9 +83,8 @@ continuation_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     if (cont == NULL) {
         return PyErr_NoMemory();
     }
-    cont->stack.datastack_chunk = NULL;
-    cont->stack.datastack_top = NULL;
-    cont->stack.datastack_limit = NULL;
+    cont->top_chunk = NULL;
+    cont->root_chunk = NULL;
     cont->current_frame = NULL;
     cont->exc_info = NULL;
     cont->root_exc_info = NULL;
