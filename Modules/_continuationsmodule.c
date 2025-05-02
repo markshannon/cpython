@@ -90,7 +90,9 @@ continuation_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     cont->root_exc_info = NULL;
     cont->root_frame = NULL;
     cont->cont_weakreflist = NULL;
+    cont->started = 0;
     cont->executing = 0;
+    cont->completed = 0;
     PyObject *func;
     PyObject *callargs;
     PyObject *kwargs;
@@ -126,6 +128,12 @@ continuation_traverse(PyObject *self, visitproc visit, void *arg)
     return 0;
 }
 
+static PyMemberDef continuation_members[] = {
+    { "started", Py_T_BOOL, offsetof(PyContinuationObject, started), Py_READONLY },
+    { "executing", Py_T_BOOL, offsetof(PyContinuationObject, executing), Py_READONLY },
+    { "completed", Py_T_BOOL, offsetof(PyContinuationObject, completed), Py_READONLY },
+};
+
 PyTypeObject PyContinuation_Type = {
     PyVarObject_HEAD_INIT(&PyType_Type, 0)
     .tp_name = "_Continuation",
@@ -138,6 +146,7 @@ PyTypeObject PyContinuation_Type = {
     .tp_methods = continuation_methods,
     .tp_finalize = continuation_finalize,
     .tp_traverse = continuation_traverse,
+    .tp_members = continuation_members,
 };
 
 

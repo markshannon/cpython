@@ -9828,9 +9828,10 @@
             INSTRUCTION_STATS(PAUSE_CONTINUATION);
             frame->return_offset = 1 ;
             tstate->current_continuation->current_frame = frame;
+            tstate->current_continuation->executing = 0;
             _PyFrame_StackPush(&entry_frame, PyStackRef_None);
             _PyFrame_SetStackPointer(frame, stack_pointer);
-            frame = &entry_frame;
+            tstate->current_frame = frame = &entry_frame;
             stack_pointer = _PyFrame_GetStackPointer(frame);
             tstate->current_continuation->root_frame->previous = NULL;
             LOAD_IP(frame->return_offset);

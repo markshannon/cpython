@@ -5047,9 +5047,10 @@ dummy_func(
         tier1 inst(PAUSE_CONTINUATION, ( -- )) {
             frame->return_offset = INSTRUCTION_SIZE;
             tstate->current_continuation->current_frame = frame;
+            tstate->current_continuation->executing = 0;
             _PyFrame_StackPush(&entry_frame, PyStackRef_None);
             SAVE_STACK();
-            frame = &entry_frame;
+            tstate->current_frame = frame = &entry_frame;
             RELOAD_STACK();
             tstate->current_continuation->root_frame->previous = NULL;
             LOAD_IP(frame->return_offset);

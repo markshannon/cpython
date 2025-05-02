@@ -946,7 +946,6 @@ set_stack_chunk(PyThreadState *tstate, _PyStackChunk *chunk)
 static void
 attach(PyThreadState *tstate, PyContinuationObject *cont)
 {
-
     assert(tstate->current_continuation == NULL);
     cont->root_frame->previous = tstate->current_frame;
     tstate->current_frame = cont->current_frame;
@@ -956,7 +955,7 @@ attach(PyThreadState *tstate, PyContinuationObject *cont)
 }
 
 static void
-detach(PyThreadState *tstate, PyContinuationObject *cont, _PyInterpreterFrame *current)
+detach(PyThreadState *tstate, PyContinuationObject *cont)
 {
     cont->top_chunk = tstate->datastack_chunk;
     set_stack_chunk(tstate, cont->root_chunk->previous);
@@ -997,6 +996,7 @@ _Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args,
     cont->top_chunk = cont->root_chunk = chunk;
     tstate->current_continuation = cont;
     assert(cont->root_chunk->previous == temp);
+    _PyInterpreterFrame *top_frame = tstate->current_frame;
     Py_INCREF(args);
     Py_XINCREF(kwargs);
     _PyStackRef func_st = PyStackRef_FromPyObjectNew(func);
@@ -1004,16 +1004,16 @@ _Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args,
     _PyInterpreterFrame *new_frame = _PyEvalFramePushAndInit_Ex(
                         tstate, func_st, NULL,
                         nargs, args, kwargs, NULL);
-    cont->root_frame = new_frame;
-    detach(tstate, cont);
-    assert(cont->root_frame->previous == NULL);
-    assert(cont->root_chunk->previous == NULL);
-    assert(tstate->datastack_chunk == temp);
-    cont->current_frame = new_frame;
-    assert(cont->top_chunk != NULL);
+    cont->current_frame = cont->root_frame = new_frame;
+    cont->top_chunk = cont->root_chunk = tstate->datastack_chunk;
+    cont->root_chunk->previous = NULL;
+    set_stack_chunk(tstate, temp);
+    tstate->current_frame = top_frame;
+    tstate->current_continuation = NULL;
     if (new_frame == NULL) {
         return -1;
     }
+    new_frame->previous = NULL;
     return 0;
 }
 
@@ -1034,6 +1034,10 @@ resume_continuation(PyThreadState *tstate, PyObject *continuation, _PyInterprete
     }
     if (prev->root_frame->previous != entry_frame) {
         PyErr_SetString(PyExc_RuntimeError, "Cannot resume continuation across builtin function call");
+        return -1;
+    }
+    if (cont->completed) {
+        PyErr_SetString(PyExc_RuntimeError, "Cannot resume a completed continuation");
         return -1;
     }
     Py_INCREF(cont);
@@ -1057,13 +1061,31 @@ _Py_StartContinuation(PyThreadState *tstate, PyObject *continuation)
     PyContinuationObject *prev = tstate->current_continuation;
     if (prev != NULL) {
         PyErr_SetString(PyExc_RuntimeError, "Cannot start a continuation from within a continuation");
+        return NULL;
     }
+    if (cont->started) {
+        PyErr_SetString(PyExc_RuntimeError, "Cannot start an already started continuation");
+        return NULL;
+    }
+    cont->started = 1;
+    _PyInterpreterFrame *start = tstate->current_frame;
+    _PyStackChunk *chunk = tstate->datastack_chunk;
+    assert(start != NULL);
+    assert(cont->root_frame == cont->current_frame);
     Py_INCREF(cont);
-    attach(tstate, cont);
+    tstate->current_continuation = cont;
+    cont->root_chunk->previous = tstate->datastack_chunk;
+    set_stack_chunk(tstate, cont->top_chunk);
+    cont->executing = 1;
     PyObject *result = _PyEval_EvalFrame(tstate, cont->current_frame, 0);
+    set_stack_chunk(tstate, chunk);
     assert(tstate->current_continuation == cont);
-    detach(tstate, cont);
-    Py_DECREF(cont);
+    assert(tstate->current_frame == start);
+    if (tstate->current_continuation->executing) {
+        tstate->current_continuation->executing = 0;
+        tstate->current_continuation->completed = 1;
+    }
+    Py_CLEAR(tstate->current_continuation);
     return result;
 }
 
