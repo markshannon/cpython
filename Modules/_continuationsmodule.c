@@ -278,12 +278,12 @@ continuation_start(PyObject *self, PyObject *Py_UNUSED(unused))
     // }
     PyThreadState *tstate = PyThreadState_GET();
     PyContinuationObject *cont = (PyContinuationObject *)self;
-    assert(cont->root_frame == cont->current_frame);
-    assert(cont->root_frame != NULL);
     if (cont->started) {
         PyErr_SetString(PyExc_RuntimeError, "Cannot start an already started continuation");
         return NULL;
     }
+    assert(cont->root_frame == cont->current_frame);
+    assert(cont->root_frame != NULL);
     return run(tstate, cont, NULL);
 }
 
