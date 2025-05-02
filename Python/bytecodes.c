@@ -5030,7 +5030,7 @@ dummy_func(
             DEAD(val);
             SAVE_STACK();
             frame->return_offset = INSTRUCTION_SIZE;
-            int err = resume_continuation(tstate, continuation, &entry_frame);
+            int err = _Py_ResumeContinuation(tstate, continuation, &entry_frame);
             Py_DECREF(continuation);
             if (err < 0) {
                 RELOAD_STACK();
@@ -5047,12 +5047,12 @@ dummy_func(
         tier1 inst(PAUSE_CONTINUATION, ( -- )) {
             frame->return_offset = INSTRUCTION_SIZE;
             tstate->current_continuation->current_frame = frame;
+            tstate->current_continuation->root_frame->previous = NULL;
             tstate->current_continuation->executing = 0;
             _PyFrame_StackPush(&entry_frame, PyStackRef_None);
             SAVE_STACK();
             tstate->current_frame = frame = &entry_frame;
             RELOAD_STACK();
-            tstate->current_continuation->root_frame->previous = NULL;
             LOAD_IP(frame->return_offset);
             LLTRACE_RESUME_FRAME();
         }

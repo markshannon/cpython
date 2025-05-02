@@ -9828,12 +9828,12 @@
             INSTRUCTION_STATS(PAUSE_CONTINUATION);
             frame->return_offset = 1 ;
             tstate->current_continuation->current_frame = frame;
+            tstate->current_continuation->root_frame->previous = NULL;
             tstate->current_continuation->executing = 0;
             _PyFrame_StackPush(&entry_frame, PyStackRef_None);
             _PyFrame_SetStackPointer(frame, stack_pointer);
             tstate->current_frame = frame = &entry_frame;
             stack_pointer = _PyFrame_GetStackPointer(frame);
-            tstate->current_continuation->root_frame->previous = NULL;
             LOAD_IP(frame->return_offset);
             LLTRACE_RESUME_FRAME();
             DISPATCH();
@@ -10284,7 +10284,7 @@
             assert(WITHIN_STACK_BOUNDS());
             _PyFrame_SetStackPointer(frame, stack_pointer);
             frame->return_offset = 1 ;
-            int err = resume_continuation(tstate, continuation, &entry_frame);
+            int err = _Py_ResumeContinuation(tstate, continuation, &entry_frame);
             Py_DECREF(continuation);
             if (err < 0) {
                 PyStackRef_CLOSE(val);
