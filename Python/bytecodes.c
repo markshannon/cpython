@@ -5026,34 +5026,57 @@ dummy_func(
         }
 
         tier1 inst(RESUME_CONTINUATION, (cont, val -- res)) {
-            PyObject *continuation = PyStackRef_AsPyObjectSteal(cont);
+            assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
+            PyContinuationObject *prev = tstate->current_continuation;
+            if (prev == NULL) {
+                PyErr_SetString(PyExc_RuntimeError, "Cannot resume a continuation from outside a continuation");
+                ERROR_NO_POP();
+            }
+            if (prev->root_frame->previous != &entry_frame) {
+                PyErr_SetString(PyExc_RuntimeError, "Cannot resume continuation across builtin function call");
+                ERROR_NO_POP();
+            }
+            PyContinuationObject *continuation = (PyContinuationObject *)PyStackRef_AsPyObjectSteal(cont);
+            // TO DO -- Check that continuation is actually a Continuation.
+            // if (Py_TYPE(continuation) != &PyContinuation_Type) {
+            //     PyErr_SetString(PyExc_TypeError, "Expected a continuation");
+            //     return -1;
+            // }
+            if (continuation->completed) {
+                PyStackRef_CLOSE( val);
+                Py_DECREF(continuation);
+                PyErr_SetString(PyExc_RuntimeError, "Cannot resume a completed continuation");
+                ERROR_IF(true, error);
+            }
             DEAD(val);
             SAVE_STACK();
             frame->return_offset = INSTRUCTION_SIZE;
-            int err = _Py_ResumeContinuation(tstate, continuation, &entry_frame);
-            Py_DECREF(continuation);
-            if (err < 0) {
-                RELOAD_STACK();
-                PyStackRef_CLOSE(val);
-                ERROR_IF(true, error);
-            }
+            _Py_Continuation_Detach(tstate);
+            _Py_Continuation_Attach(tstate, continuation);
             frame = tstate->current_frame;
             RELOAD_STACK();
+            assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(frame));
             res = val;
             LOAD_IP(frame->return_offset);
             LLTRACE_RESUME_FRAME();
         }
 
         tier1 inst(PAUSE_CONTINUATION, ( -- )) {
+            if (tstate->current_continuation == NULL) {
+                PyErr_SetString(PyExc_RuntimeError, "No continuation to pause");
+                ERROR_NO_POP();
+            }
+            assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
             frame->return_offset = INSTRUCTION_SIZE;
-            tstate->current_continuation->current_frame = frame;
-            tstate->current_continuation->root_frame->previous = NULL;
-            tstate->current_continuation->executing = 0;
-            _PyFrame_StackPush(&entry_frame, PyStackRef_None);
+            assert(tstate->current_continuation->root_frame->previous == &entry_frame);
             SAVE_STACK();
-            tstate->current_frame = frame = &entry_frame;
+            _Py_Continuation_Detach(tstate);
+            assert(tstate->current_frame == &entry_frame);
+            frame = tstate->current_frame;
+            _PyFrame_StackPush(frame, PyStackRef_None);
             RELOAD_STACK();
             LOAD_IP(frame->return_offset);
+            assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
             LLTRACE_RESUME_FRAME();
         }
 
@@ -5386,6 +5409,7 @@ dummy_func(
             if (too_deep) {
                 goto exit_unwind;
             }
+            assert(check_recursion_depth(tstate));
             next_instr = frame->instr_ptr;
         #ifdef Py_DEBUG
             int lltrace = maybe_lltrace_resume_frame(frame, GLOBALS());

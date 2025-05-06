@@ -930,9 +930,8 @@ _PyObjectArray_Free(PyObject **array, PyObject **scratch)
     }
 }
 
-extern int
-_Py_ResumeContinuation(PyThreadState *tstate, PyObject *continuation, _PyInterpreterFrame *entry_frame);
-
+extern int _Py_Continuation_Attach(PyThreadState *tstate, PyContinuationObject *continuation);
+extern int _Py_Continuation_Detach(PyThreadState *tstate);
 
 /* _PyEval_EvalFrameDefault is too large to optimize for speed with PGO on MSVC.
  */
@@ -959,6 +958,26 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
 {
     return _PyEval_EvalFrames(tstate, frame, frame, throwflag);
 }
+
+/* Remove this */
+int
+get_recursion_depth(_PyInterpreterFrame *f) {
+    int count = 0;
+    while (f != NULL) {
+        if (f->owner < FRAME_OWNED_BY_INTERPRETER) {
+            count++;
+        }
+        f = f->previous;
+    }
+    return count;
+}
+
+static int
+check_recursion_depth(PyThreadState *tstate) {
+    int expected = tstate->py_recursion_limit - tstate->py_recursion_remaining;
+    return get_recursion_depth(tstate->current_frame) == expected;
+}
+
 
 PyObject *
 _PyEval_EvalFrames(PyThreadState *tstate, _PyInterpreterFrame *base, _PyInterpreterFrame *frame, int throwflag)

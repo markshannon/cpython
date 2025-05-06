@@ -76,6 +76,8 @@ typedef struct _continuation {
     uint8_t started;
     uint8_t executing;
     uint8_t completed;
+    int32_t stack_depth; // Only meaningful when not executing.
+    int32_t depth_before_root; // Only meaningful when executing.
 } PyContinuationObject;
 
 struct _ts {

@@ -88,20 +88,57 @@ set_stack_chunk(PyThreadState *tstate, _PyStackChunk *chunk)
     tstate->datastack_limit = (PyObject **)(((char *)chunk) + chunk->size);
 }
 
-static void
-attach(PyThreadState *tstate, PyContinuationObject *cont)
+static int
+computed_stack_depth(PyContinuationObject *cont) {
+    int depth = 1;
+    _PyInterpreterFrame *f = cont->current_frame;
+    while (f != cont->root_frame) {
+        if (f->owner < FRAME_OWNED_BY_INTERPRETER) {
+            depth++;
+        }
+        f = f->previous;
+    }
+    assert(cont->root_frame->owner < FRAME_OWNED_BY_INTERPRETER);
+    return depth;
+}
+
+
+extern PyObject *_PyEval_EvalFrames(PyThreadState *tstate, _PyInterpreterFrame *base, _PyInterpreterFrame *top, int throwflag);
+
+/* Remove this */
+extern int get_recursion_depth(_PyInterpreterFrame *f);
+
+void
+_Py_Continuation_Attach(PyThreadState *tstate, PyContinuationObject *cont)
 {
-    assert(tstate->current_continuation == NULL);
+    assert(cont->stack_depth == computed_stack_depth(cont));
+    assert(cont->root_frame->previous == NULL);
+    int start_depth = tstate->py_recursion_limit - tstate->py_recursion_remaining;
+    assert(start_depth == get_recursion_depth(tstate->current_frame));
+    tstate->py_recursion_remaining -= cont->stack_depth;
+    cont->depth_before_root = start_depth;
+    cont->stack_depth = -1;
     cont->root_frame->previous = tstate->current_frame;
     tstate->current_frame = cont->current_frame;
     tstate->current_continuation = cont;
     cont->root_chunk->previous = tstate->datastack_chunk;
     set_stack_chunk(tstate, cont->top_chunk);
+    assert(cont->depth_before_root == get_recursion_depth(cont->root_frame->previous));
+    assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
+    cont->executing = 1;
 }
 
-static void
-detach(PyThreadState *tstate, PyContinuationObject *cont)
+void
+_Py_Continuation_Detach(PyThreadState *tstate)
 {
+    assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
+    PyContinuationObject *cont = tstate->current_continuation;
+    int current_depth = tstate->py_recursion_limit - tstate->py_recursion_remaining;
+    assert(current_depth == get_recursion_depth(tstate->current_frame));
+    assert(cont->depth_before_root == get_recursion_depth(cont->root_frame->previous));
+    cont->stack_depth = current_depth - cont->depth_before_root;
+    tstate->py_recursion_remaining = tstate->py_recursion_limit - cont->depth_before_root;
+    cont->depth_before_root = -1;
     cont->top_chunk = tstate->datastack_chunk;
     set_stack_chunk(tstate, cont->root_chunk->previous);
     cont->root_chunk->previous = NULL;
@@ -109,6 +146,44 @@ detach(PyThreadState *tstate, PyContinuationObject *cont)
     tstate->current_frame = cont->root_frame->previous;
     cont->root_frame->previous = NULL;
     tstate->current_continuation = NULL;
+    assert(cont->stack_depth == computed_stack_depth(cont));
+    assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
+    cont->executing = 0;
+    Py_DECREF(cont);
+}
+
+static void
+attach(PyThreadState *tstate, PyContinuationObject *cont)
+{
+    assert(cont->stack_depth == computed_stack_depth(cont));
+    tstate->py_recursion_remaining -= cont->stack_depth;
+    cont->depth_before_root = tstate->py_recursion_limit - tstate->py_recursion_remaining;
+    cont->stack_depth = -1;
+    assert(tstate->current_continuation == NULL);
+    cont->root_frame->previous = tstate->current_frame;
+    tstate->current_frame = cont->current_frame;
+    tstate->current_continuation = cont;
+    cont->root_chunk->previous = tstate->datastack_chunk;
+    set_stack_chunk(tstate, cont->top_chunk);
+    cont->executing = 1;
+}
+
+static void
+detach(PyThreadState *tstate, PyContinuationObject *cont)
+{
+    int current_depth = tstate->py_recursion_limit - tstate->py_recursion_remaining;
+    cont->stack_depth = current_depth - cont->depth_before_root;
+    assert(cont->stack_depth == computed_stack_depth(cont));
+    tstate->py_recursion_remaining = tstate->py_recursion_limit - cont->depth_before_root;
+    cont->depth_before_root = -1;
+    cont->top_chunk = tstate->datastack_chunk;
+    set_stack_chunk(tstate, cont->root_chunk->previous);
+    cont->root_chunk->previous = NULL;
+    cont->current_frame = tstate->current_frame;
+    tstate->current_frame = cont->root_frame->previous;
+    cont->root_frame->previous = NULL;
+    tstate->current_continuation = NULL;
+    cont->executing = 0;
 }
 
 extern _PyStackChunk*
@@ -154,6 +229,8 @@ _Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args,
                         tstate, func_st, NULL,
                         nargs, args, kwargs, NULL);
     cont->current_frame = cont->root_frame = new_frame;
+    cont->stack_depth = 1;
+    assert(cont->stack_depth == computed_stack_depth(cont));
     cont->top_chunk = cont->root_chunk = tstate->datastack_chunk;
     cont->root_chunk->previous = NULL;
     set_stack_chunk(tstate, temp);
@@ -212,6 +289,8 @@ continuation_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     cont->started = 0;
     cont->executing = 0;
     cont->completed = 0;
+    cont->stack_depth = -1;
+    cont->depth_before_root = -1;
     PyObject *func;
     PyObject *callargs;
     PyObject *kwargs;
@@ -227,21 +306,27 @@ continuation_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     return (PyObject *)cont;
 }
 
-extern PyObject *_PyEval_EvalFrames(PyThreadState *tstate, _PyInterpreterFrame *base, _PyInterpreterFrame *top, int throwflag);
-
-
 static PyObject *
 run(PyThreadState *tstate, PyContinuationObject *cont, PyObject *value)
 {
+    assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
     cont->started = 1;
     _PyInterpreterFrame *start = tstate->current_frame;
     _PyStackChunk *chunk = tstate->datastack_chunk;
     assert(start != NULL);
+    assert(tstate->current_continuation == NULL);
     Py_INCREF(cont);
     tstate->current_continuation = cont;
     cont->root_chunk->previous = tstate->datastack_chunk;
+    assert(cont->stack_depth > 0);
+    if (value == NULL) { assert(cont->stack_depth == 1); }
+    assert(cont->stack_depth == computed_stack_depth(cont));
+    int start_depth = tstate->py_recursion_limit - tstate->py_recursion_remaining;
+    assert(start_depth == get_recursion_depth(tstate->current_frame));
+    tstate->py_recursion_remaining -= cont->stack_depth;
+    cont->depth_before_root = start_depth;
+    cont->stack_depth = -1;
     set_stack_chunk(tstate, cont->top_chunk);
-    PyContinuationObject *prev = tstate->current_continuation;
     cont->executing = 1;
     _PyInterpreterFrame *frame = cont->current_frame;
     PyObject *result;
@@ -250,20 +335,29 @@ run(PyThreadState *tstate, PyContinuationObject *cont, PyObject *value)
         _PyFrame_StackPush(frame, ref);
         frame->instr_ptr += frame->return_offset;
         frame->return_offset = 0;
+        tstate->py_recursion_remaining++;
         result = _PyEval_EvalFrames(tstate, cont->root_frame, cont->current_frame, 0);
     }
     else {
+        tstate->py_recursion_remaining++;
         result = _PyEval_EvalFrame(tstate, frame, 0);
     }
-    set_stack_chunk(tstate, chunk);
-    tstate->current_frame = start;
-    cont = tstate->current_continuation;
-    if (cont->executing) {
+    assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
+    if (tstate->current_continuation == NULL) {
+        // Detached.
+        assert(tstate->datastack_chunk == chunk);
+    }
+    else {
+        cont = tstate->current_continuation;
+        assert(cont->executing);
         cont->executing = 0;
         cont->completed = 1;
+        set_stack_chunk(tstate, chunk);
+        tstate->current_continuation = NULL;
     }
-    tstate->current_continuation = prev;
-    Py_DECREF(cont);
+    assert(tstate->current_frame == start);
+    assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
+    assert(tstate->current_continuation == NULL);
     return result;
 
 }
