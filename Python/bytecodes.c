@@ -5061,7 +5061,7 @@ dummy_func(
             LLTRACE_RESUME_FRAME();
         }
 
-        tier1 inst(PAUSE_CONTINUATION, ( -- )) {
+        tier1 inst(PAUSE_CONTINUATION, (val -- )) {
             if (tstate->current_continuation == NULL) {
                 PyErr_SetString(PyExc_RuntimeError, "No continuation to pause");
                 ERROR_NO_POP();
@@ -5069,11 +5069,12 @@ dummy_func(
             assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));
             frame->return_offset = INSTRUCTION_SIZE;
             assert(tstate->current_continuation->root_frame->previous == &entry_frame);
+            DEAD(val);
             SAVE_STACK();
             _Py_Continuation_Detach(tstate);
             assert(tstate->current_frame == &entry_frame);
             frame = tstate->current_frame;
-            _PyFrame_StackPush(frame, PyStackRef_None);
+            _PyFrame_StackPush(frame, val);
             RELOAD_STACK();
             LOAD_IP(frame->return_offset);
             assert(tstate->py_recursion_limit - tstate->py_recursion_remaining == get_recursion_depth(tstate->current_frame));

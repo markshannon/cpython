@@ -196,18 +196,8 @@ _PyEvalFramePushAndInit_Ex(PyThreadState *tstate, _PyStackRef func,
 int
 _Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args, PyObject *kwargs)
 {
-    if (cont->root_frame != NULL) {
-        PyErr_SetString(PyExc_RuntimeError, "Continuation has already been started");
-        return -1;
-    }
-    if (!PyTuple_CheckExact(args)) {
-        PyErr_SetString(PyExc_TypeError, "args must be a tuple");
-        return -1;
-    }
-    if (kwargs != NULL && !PyDict_CheckExact(kwargs)) {
-        PyErr_SetString(PyExc_TypeError, "kwargs must be a dict");
-        return -1;
-    }
+    assert(PyTuple_CheckExact(args));
+    assert(kwargs == NULL || PyDict_CheckExact(kwargs));
     PyThreadState *tstate = PyThreadState_GET();
     _PyStackChunk *temp = tstate->datastack_chunk;
     PyFunctionObject *func_obj = (PyFunctionObject *)func;
@@ -228,14 +218,17 @@ _Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args,
     _PyInterpreterFrame *new_frame = _PyEvalFramePushAndInit_Ex(
                         tstate, func_st, NULL,
                         nargs, args, kwargs, NULL);
+    tstate->current_frame = top_frame;
+    tstate->current_continuation = NULL;
+    if (new_frame == NULL) {
+        return -1;
+    }
     cont->current_frame = cont->root_frame = new_frame;
     cont->stack_depth = 1;
     assert(cont->stack_depth == computed_stack_depth(cont));
     cont->top_chunk = cont->root_chunk = tstate->datastack_chunk;
     cont->root_chunk->previous = NULL;
     set_stack_chunk(tstate, temp);
-    tstate->current_frame = top_frame;
-    tstate->current_continuation = NULL;
     if (new_frame == NULL) {
         return -1;
     }
@@ -292,17 +285,13 @@ continuation_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     cont->stack_depth = -1;
     cont->depth_before_root = -1;
     PyObject *func;
-    PyObject *callargs;
-    PyObject *kwargs;
-    static char *kwlist[] = {"func", "args", "kwrgs", NULL};
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "OOO", kwlist,
-        &func, &callargs, &kwargs)) {
-        return NULL;
-    }
-    if (_Py_InitContinuation(cont, func, callargs, kwargs) < 0) {
+    static char *kwlist[] = {"func", NULL};
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwlist,
+        &func)) {
         Py_DECREF(cont);
         return NULL;
     }
+    cont->func = Py_NewRef(func);
     return (PyObject *)cont;
 }
 
@@ -363,7 +352,7 @@ run(PyThreadState *tstate, PyContinuationObject *cont, PyObject *value)
 }
 
 static PyObject *
-continuation_start(PyObject *self, PyObject *Py_UNUSED(unused))
+continuation_start(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     // TO DO -- Check that continuation is actually a Continuation.
     // if (Py_TYPE(continuation) != &PyContinuation_Type) {
@@ -376,6 +365,8 @@ continuation_start(PyObject *self, PyObject *Py_UNUSED(unused))
         PyErr_SetString(PyExc_RuntimeError, "Cannot start an already started continuation");
         return NULL;
     }
+    _Py_InitContinuation(cont, cont->func, args, kwargs);
+    Py_CLEAR(cont->func);
     assert(cont->root_frame == cont->current_frame);
     assert(cont->root_frame != NULL);
     return run(tstate, cont, NULL);
@@ -400,7 +391,7 @@ continuation_run(PyObject *self, PyObject *arg)
 }
 
 static PyMethodDef continuation_methods[] = {
-    {"start", _PyCFunction_CAST(continuation_start), METH_NOARGS, NULL },
+    {"start", _PyCFunction_CAST(continuation_start), METH_VARARGS | METH_KEYWORDS, NULL },
     {"run", _PyCFunction_CAST(continuation_run), METH_O, NULL },
     // {"close", _PyCFunction_CAST(continuation_close), METH_NOARGS, NULL},
     {NULL, NULL}        /* Sentinel */

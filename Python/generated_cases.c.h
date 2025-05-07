@@ -9826,6 +9826,8 @@
             frame->instr_ptr = next_instr;
             next_instr += 1;
             INSTRUCTION_STATS(PAUSE_CONTINUATION);
+            _PyStackRef val;
+            val = stack_pointer[-1];
             if (tstate->current_continuation == NULL) {
                 _PyFrame_SetStackPointer(frame, stack_pointer);
                 PyErr_SetString(PyExc_RuntimeError, "No continuation to pause");
@@ -9837,11 +9839,13 @@
             stack_pointer = _PyFrame_GetStackPointer(frame);
             frame->return_offset = 1 ;
             assert(tstate->current_continuation->root_frame->previous == &entry_frame);
+            stack_pointer += -1;
+            assert(WITHIN_STACK_BOUNDS());
             _PyFrame_SetStackPointer(frame, stack_pointer);
             _Py_Continuation_Detach(tstate);
             assert(tstate->current_frame == &entry_frame);
             frame = tstate->current_frame;
-            _PyFrame_StackPush(frame, PyStackRef_None);
+            _PyFrame_StackPush(frame, val);
             stack_pointer = _PyFrame_GetStackPointer(frame);
             LOAD_IP(frame->return_offset);
             _PyFrame_SetStackPointer(frame, stack_pointer);

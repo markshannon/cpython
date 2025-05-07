@@ -73,6 +73,7 @@ typedef struct _continuation {
     _PyErr_StackItem *exc_info;
     _PyErr_StackItem *root_exc_info;
     PyObject *cont_weakreflist;
+    PyObject *func;
     uint8_t started;
     uint8_t executing;
     uint8_t completed;

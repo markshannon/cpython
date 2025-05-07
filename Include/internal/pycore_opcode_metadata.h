@@ -386,7 +386,7 @@ int _PyOpcode_num_popped(int opcode, int oparg)  {
         case NOT_TAKEN:
             return 0;
         case PAUSE_CONTINUATION:
-            return 0;
+            return 1;
         case POP_BLOCK:
             return 0;
         case POP_EXCEPT:

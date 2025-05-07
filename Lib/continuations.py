@@ -20,7 +20,7 @@ class Continuation(_continuations._Continuation):
         return self is value
 
     @staticmethod
-    @replace_opcode("LOAD_CONST", "PAUSE_CONTINUATION")
-    def pause():
-        return None
+    @replace_opcode("UNARY_NEGATIVE", "PAUSE_CONTINUATION")
+    def pause(value):
+        return -value
 
