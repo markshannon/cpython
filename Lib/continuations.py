@@ -16,7 +16,7 @@ class Continuation(_continuations._Continuation):
     __slots__ = ()
 
     @replace_opcode("IS_OP", "RESUME_CONTINUATION")
-    def resume(self, value):
+    def send(self, value):
         return self is value
 
     @staticmethod
