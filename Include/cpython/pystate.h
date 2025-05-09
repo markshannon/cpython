@@ -8,8 +8,6 @@
 PyAPI_FUNC(int) _PyInterpreterState_RequiresIDRef(PyInterpreterState *);
 PyAPI_FUNC(void) _PyInterpreterState_RequireIDRef(PyInterpreterState *, int);
 
-PyAPI_FUNC(PyObject *) PyUnstable_InterpreterState_GetMainModule(PyInterpreterState *);
-
 /* State unique per thread */
 
 /* Py_tracefunc return -1 when raising an exception, or 0 for success. */
@@ -138,8 +136,6 @@ struct _ts {
 
     int py_recursion_remaining;
     int py_recursion_limit;
-
-    int c_recursion_remaining; /* Retained for backwards compatibility. Do not use */
     int recursion_headroom; /* Allow 50 more calls to handle any errors. */
 
     /* 'tracing' keeps track of the execution depth when tracing/profiling.
@@ -219,7 +215,7 @@ struct _ts {
     /* The thread's exception stack entry.  (Always the last entry.) */
     _PyErr_StackItem exc_state;
 
-    PyObject *previous_executor;
+    PyObject *current_executor;
 
     uint64_t dict_global_version;
 
@@ -232,8 +228,6 @@ struct _ts {
     PyObject *threading_local_sentinel;
     _PyRemoteDebuggerSupport remote_debugger_support;
 };
-
-# define Py_C_RECURSION_LIMIT 5000
 
 /* other API */
 

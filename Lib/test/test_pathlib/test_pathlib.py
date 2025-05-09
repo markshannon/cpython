@@ -16,6 +16,7 @@ from unittest import mock
 from urllib.request import pathname2url
 
 from test.support import import_helper
+from test.support import cpython_only
 from test.support import is_emscripten, is_wasi
 from test.support import infinite_recursion
 from test.support import os_helper
@@ -78,6 +79,12 @@ class UnsupportedOperationTest(unittest.TestCase):
     def test_is_notimplemented(self):
         self.assertTrue(issubclass(pathlib.UnsupportedOperation, NotImplementedError))
         self.assertTrue(isinstance(pathlib.UnsupportedOperation(), NotImplementedError))
+
+
+class LazyImportTest(unittest.TestCase):
+    @cpython_only
+    def test_lazy_import(self):
+        import_helper.ensure_lazy_imports("pathlib", {"shutil"})
 
 
 #
@@ -2065,7 +2072,7 @@ class PathTest(PurePathTest):
         os.chown(link, -1, gid_2, follow_symlinks=False)
 
         expected_gid = link.stat(follow_symlinks=False).st_gid
-        expected_name = self._get_pw_name_or_skip_test(expected_gid)
+        expected_name = self._get_gr_name_or_skip_test(expected_gid)
 
         self.assertEqual(expected_gid, gid_2)
         self.assertEqual(expected_name, link.group(follow_symlinks=False))
@@ -3285,10 +3292,13 @@ class PathTest(PurePathTest):
     def test_from_uri_posix(self):
         P = self.cls
         self.assertEqual(P.from_uri('file:/foo/bar'), P('/foo/bar'))
-        self.assertEqual(P.from_uri('file://foo/bar'), P('//foo/bar'))
+        self.assertRaises(ValueError, P.from_uri, 'file://foo/bar')
         self.assertEqual(P.from_uri('file:///foo/bar'), P('/foo/bar'))
         self.assertEqual(P.from_uri('file:////foo/bar'), P('//foo/bar'))
         self.assertEqual(P.from_uri('file://localhost/foo/bar'), P('/foo/bar'))
+        if not is_wasi:
+            self.assertEqual(P.from_uri(f'file://{socket.gethostname()}/foo/bar'),
+                             P('/foo/bar'))
         self.assertRaises(ValueError, P.from_uri, 'foo/bar')
         self.assertRaises(ValueError, P.from_uri, '/foo/bar')
         self.assertRaises(ValueError, P.from_uri, '//foo/bar')
@@ -3298,8 +3308,8 @@ class PathTest(PurePathTest):
     @needs_posix
     def test_from_uri_pathname2url_posix(self):
         P = self.cls
-        self.assertEqual(P.from_uri('file:' + pathname2url('/foo/bar')), P('/foo/bar'))
-        self.assertEqual(P.from_uri('file:' + pathname2url('//foo/bar')), P('//foo/bar'))
+        self.assertEqual(P.from_uri(pathname2url('/foo/bar', add_scheme=True)), P('/foo/bar'))
+        self.assertEqual(P.from_uri(pathname2url('//foo/bar', add_scheme=True)), P('//foo/bar'))
 
     @needs_windows
     def test_absolute_windows(self):
