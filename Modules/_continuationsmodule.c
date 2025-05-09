@@ -31,27 +31,6 @@ continuation_dealloc(PyObject *self)
     _PyObject_GC_UNTRACK(self);
     PyObject_GC_Del(self);
 }
-/*
-static PyObject *
-continuation_close(PyObject *self)
-{
-    PyContinuationObject *cont = (PyContinuationObject *)self;
-    if (cont->executing) {
-        char *msg = "Cannot close running continuation";
-        PyErr_SetString(PyExc_ValueError, msg);
-        return NULL;
-    }
-    PyThreadState *tstate = PyThreadState_GET();
-    attach(cont, tstate);
-    PyErr_SetNone(PyExc_ContinuationExit);
-    PyObject *result = _PyEval_EvalFrame(tstate, tstate->current_frame, 1);
-    detach(cont, tstate);
-    if (result == NULL && PyErr_ExceptionMatches(PyExc_ContinuationExit) {
-        PyErr_Clear();
-        result = Py_None;
-    }
-    return result;
-}*/
 
 static PyObject *
 continuation_repr(PyObject *self)
@@ -59,20 +38,6 @@ continuation_repr(PyObject *self)
     return PyUnicode_FromFormat("<Continuation object %llu>",
                                 ((PyContinuationObject *)self)->id);
 }
-
-static void
-continuation_finalize(PyObject *self)
-{
-//     PyObject *result = continuation_close(self);
-//     if (result == NULL) {
-//         assert(PyErr_Occurred());
-//         PyErr_WriteUnraisable(self);
-//     }
-//     else {
-//         Py_DECREF(result);
-//     }
-}
-
 
 static void
 set_stack_chunk(PyThreadState *tstate, _PyStackChunk *chunk)
@@ -152,40 +117,6 @@ _Py_Continuation_Detach(PyThreadState *tstate)
     Py_DECREF(cont);
 }
 
-static void
-attach(PyThreadState *tstate, PyContinuationObject *cont)
-{
-    assert(cont->stack_depth == computed_stack_depth(cont));
-    tstate->py_recursion_remaining -= cont->stack_depth;
-    cont->depth_before_root = tstate->py_recursion_limit - tstate->py_recursion_remaining;
-    cont->stack_depth = -1;
-    assert(tstate->current_continuation == NULL);
-    cont->root_frame->previous = tstate->current_frame;
-    tstate->current_frame = cont->current_frame;
-    tstate->current_continuation = cont;
-    cont->root_chunk->previous = tstate->datastack_chunk;
-    set_stack_chunk(tstate, cont->top_chunk);
-    cont->executing = 1;
-}
-
-static void
-detach(PyThreadState *tstate, PyContinuationObject *cont)
-{
-    int current_depth = tstate->py_recursion_limit - tstate->py_recursion_remaining;
-    cont->stack_depth = current_depth - cont->depth_before_root;
-    assert(cont->stack_depth == computed_stack_depth(cont));
-    tstate->py_recursion_remaining = tstate->py_recursion_limit - cont->depth_before_root;
-    cont->depth_before_root = -1;
-    cont->top_chunk = tstate->datastack_chunk;
-    set_stack_chunk(tstate, cont->root_chunk->previous);
-    cont->root_chunk->previous = NULL;
-    cont->current_frame = tstate->current_frame;
-    tstate->current_frame = cont->root_frame->previous;
-    cont->root_frame->previous = NULL;
-    tstate->current_continuation = NULL;
-    cont->executing = 0;
-}
-
 extern _PyStackChunk*
 _Py_PushChunk(PyThreadState *tstate,  size_t size);
 
@@ -193,78 +124,6 @@ extern _PyInterpreterFrame *
 _PyEvalFramePushAndInit_Ex(PyThreadState *tstate, _PyStackRef func,
     PyObject *locals, Py_ssize_t nargs, PyObject *callargs, PyObject *kwargs, _PyInterpreterFrame *previous);
 
-int
-_Py_InitContinuation(PyContinuationObject *cont, PyObject *func, PyObject *args, PyObject *kwargs)
-{
-    assert(PyTuple_CheckExact(args));
-    assert(kwargs == NULL || PyDict_CheckExact(kwargs));
-    PyThreadState *tstate = PyThreadState_GET();
-    _PyStackChunk *temp = tstate->datastack_chunk;
-    PyFunctionObject *func_obj = (PyFunctionObject *)func;
-    PyCodeObject *code = (PyCodeObject *)func_obj->func_code;
-    _PyStackChunk *chunk = _Py_PushChunk(tstate, code->co_framesize);
-    if (chunk == NULL) {
-        PyErr_NoMemory();
-        return -1;
-    }
-    cont->top_chunk = cont->root_chunk = chunk;
-    tstate->current_continuation = cont;
-    assert(cont->root_chunk->previous == temp);
-    _PyInterpreterFrame *top_frame = tstate->current_frame;
-    Py_INCREF(args);
-    Py_XINCREF(kwargs);
-    _PyStackRef func_st = PyStackRef_FromPyObjectNew(func);
-    Py_ssize_t nargs = PyTuple_GET_SIZE(args);
-    _PyInterpreterFrame *new_frame = _PyEvalFramePushAndInit_Ex(
-                        tstate, func_st, NULL,
-                        nargs, args, kwargs, NULL);
-    tstate->current_frame = top_frame;
-    tstate->current_continuation = NULL;
-    if (new_frame == NULL) {
-        return -1;
-    }
-    cont->current_frame = cont->root_frame = new_frame;
-    cont->stack_depth = 1;
-    assert(cont->stack_depth == computed_stack_depth(cont));
-    cont->top_chunk = cont->root_chunk = tstate->datastack_chunk;
-    cont->root_chunk->previous = NULL;
-    set_stack_chunk(tstate, temp);
-    if (new_frame == NULL) {
-        return -1;
-    }
-    new_frame->previous = NULL;
-    return 0;
-}
-
-int
-_Py_ResumeContinuation(PyThreadState *tstate, PyObject *continuation, _PyInterpreterFrame *entry_frame)
-{
-    // TO DO -- Check that continuation is actually a Continuation.
-    // if (Py_TYPE(continuation) != &PyContinuation_Type) {
-    //     PyErr_SetString(PyExc_TypeError, "Expected a continuation");
-    //     return -1;
-    // }
-    PyContinuationObject *cont = (PyContinuationObject *)continuation;
-    assert(cont->root_frame != NULL);
-    PyContinuationObject *prev = tstate->current_continuation;
-    if (prev == NULL) {
-        PyErr_SetString(PyExc_RuntimeError, "Cannot resume a continuation from outside a continuation");
-        return -1;
-    }
-    if (prev->root_frame->previous != entry_frame) {
-        PyErr_SetString(PyExc_RuntimeError, "Cannot resume continuation across builtin function call");
-        return -1;
-    }
-    if (cont->completed) {
-        PyErr_SetString(PyExc_RuntimeError, "Cannot resume a completed continuation");
-        return -1;
-    }
-    Py_INCREF(cont);
-    detach(tstate, prev);
-    attach(tstate, cont);
-    Py_DECREF(prev);
-    return 0;
-}
 
 PyObject *
 continuation_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
@@ -354,6 +213,8 @@ run(PyThreadState *tstate, PyContinuationObject *cont, PyObject *value)
 static PyObject *
 continuation_start(PyObject *self, PyObject *args, PyObject *kwargs)
 {
+    assert(PyTuple_CheckExact(args));
+    assert(kwargs == NULL || PyDict_CheckExact(kwargs));
     // TO DO -- Check that continuation is actually a Continuation.
     // if (Py_TYPE(continuation) != &PyContinuation_Type) {
     //     PyErr_SetString(PyExc_TypeError, "Expected a continuation");
@@ -365,8 +226,53 @@ continuation_start(PyObject *self, PyObject *args, PyObject *kwargs)
         PyErr_SetString(PyExc_RuntimeError, "Cannot start an already started continuation");
         return NULL;
     }
-    _Py_InitContinuation(cont, cont->func, args, kwargs);
-    Py_CLEAR(cont->func);
+    PyObject *func;
+    func = PyObject_GetAttrString((PyObject *)Py_TYPE(self), "_start");
+    if (func == NULL) {
+        return NULL;
+    }
+    assert(PyFunction_Check(func));    _PyStackChunk *temp = tstate->datastack_chunk;
+    PyFunctionObject *func_obj = (PyFunctionObject *)func;
+    PyCodeObject *code = (PyCodeObject *)func_obj->func_code;
+    _PyStackChunk *chunk = _Py_PushChunk(tstate, code->co_framesize);
+    if (chunk == NULL) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    PyObject *self_arg = PyTuple_Pack(1, (PyObject *)cont);
+    if (self_arg == NULL) {
+        return NULL;
+    }
+    PyObject *callargs = PyTuple_Type.tp_as_sequence->sq_concat(self_arg, args);
+    Py_DECREF(self_arg);
+    if (callargs == NULL) {
+        return NULL;
+    }
+    cont->top_chunk = cont->root_chunk = chunk;
+    tstate->current_continuation = cont;
+    assert(cont->root_chunk->previous == temp);
+    _PyInterpreterFrame *top_frame = tstate->current_frame;
+    Py_XINCREF(kwargs);
+    _PyStackRef func_st = PyStackRef_FromPyObjectSteal(func);
+    Py_ssize_t nargs = PyTuple_GET_SIZE(callargs);
+    _PyInterpreterFrame *new_frame = _PyEvalFramePushAndInit_Ex(
+                        tstate, func_st, NULL,
+                        nargs, callargs, kwargs, NULL);
+    tstate->current_frame = top_frame;
+    tstate->current_continuation = NULL;
+    if (new_frame == NULL) {
+        return NULL;
+    }
+    cont->current_frame = cont->root_frame = new_frame;
+    cont->stack_depth = 1;
+    assert(cont->stack_depth == computed_stack_depth(cont));
+    cont->top_chunk = cont->root_chunk = tstate->datastack_chunk;
+    cont->root_chunk->previous = NULL;
+    set_stack_chunk(tstate, temp);
+    if (new_frame == NULL) {
+        return NULL;
+    }
+    new_frame->previous = NULL;
     assert(cont->root_frame == cont->current_frame);
     assert(cont->root_frame != NULL);
     return run(tstate, cont, NULL);
@@ -400,14 +306,68 @@ static PyMethodDef continuation_methods[] = {
 static int
 continuation_traverse(PyObject *self, visitproc visit, void *arg)
 {
-    // TO DO ...
+    PyContinuationObject *cont = (PyContinuationObject *)self;
+    if (!cont->started || cont->completed) {
+        return 0;
+    }
+    for (_PyInterpreterFrame *frame = cont->current_frame; frame != NULL; frame = frame->previous) {
+        if (frame->owner == FRAME_OWNED_BY_THREAD) {
+            if (_PyFrame_Traverse(frame, visit, arg)) {
+                return -1;
+            }
+        }
+    }
     return 0;
+}
+
+static int
+continuation_clear(PyObject *self)
+{
+    // TO DO -- raise an exception to unwind the continuation.
+
+    PyContinuationObject *cont = (PyContinuationObject *)self;
+    assert (!cont->executing);
+    if (!cont->started || cont->completed) {
+        return 0;
+    }
+    for (_PyInterpreterFrame *frame = cont->current_frame; frame != NULL; frame = frame->previous) {
+        if (frame->owner == FRAME_OWNED_BY_THREAD) {
+            _PyFrame_ClearLocals(frame);
+        }
+    }
+    cont->completed = 0;
+    return 0;
+}
+
+static PyObject *
+continuation_close(PyObject *self)
+{
+    PyContinuationObject *cont = (PyContinuationObject *)self;
+    if (cont->executing) {
+        char *msg = "Cannot close running continuation";
+        PyErr_SetString(PyExc_ValueError, msg);
+        return NULL;
+    }
+    continuation_clear(self);
+    Py_RETURN_NONE;
+}
+
+static void
+continuation_finalize(PyObject *self)
+{
+    PyObject *result = continuation_close(self);
+    if (result == NULL) {
+        assert(PyErr_Occurred());
+        PyErr_WriteUnraisable(self);
+    }
 }
 
 static PyMemberDef continuation_members[] = {
     { "started", Py_T_BOOL, offsetof(PyContinuationObject, started), Py_READONLY },
     { "executing", Py_T_BOOL, offsetof(PyContinuationObject, executing), Py_READONLY },
     { "completed", Py_T_BOOL, offsetof(PyContinuationObject, completed), Py_READONLY },
+    { "_func", Py_T_OBJECT_EX, offsetof(PyContinuationObject, func), Py_READONLY },
+    { NULL }
 };
 
 PyTypeObject PyContinuation_Type = {
@@ -422,6 +382,7 @@ PyTypeObject PyContinuation_Type = {
     .tp_methods = continuation_methods,
     .tp_finalize = continuation_finalize,
     .tp_traverse = continuation_traverse,
+    .tp_clear = continuation_clear,
     .tp_members = continuation_members,
 };
 

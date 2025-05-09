@@ -19,8 +19,8 @@ class Continuation(_continuations._Continuation):
     def send(self, value):
         return self is value
 
-    @staticmethod
     @replace_opcode("UNARY_NEGATIVE", "PAUSE_CONTINUATION")
-    def pause(value):
-        return -value
+    def _start(self, *args, **kwargs):
+        -None
+        return self._func(*args, **kwargs)
 
