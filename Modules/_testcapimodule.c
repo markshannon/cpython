@@ -3217,6 +3217,30 @@ create_managed_dict_type(void)
    return PyType_FromSpec(&ManagedDict_spec);
 }
 
+
+typedef struct {
+    PyObject_HEAD
+} ManagedWeakrefObject;
+
+static PyType_Slot ManagedWeakref_slots[] = {
+    {Py_tp_new, (void *)PyType_GenericNew},
+    {0}
+};
+
+static PyType_Spec ManagedWeakRef_spec = {
+    "_testcapi.ManagedWeakrefType",
+    sizeof(ManagedWeakrefObject),
+    0, // itemsize
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_MANAGED_WEAKREF,
+    ManagedWeakref_slots
+};
+
+static PyObject *
+create_managed_weakref_type(void)
+{
+   return PyType_FromSpec(&ManagedWeakRef_spec);
+}
+
 static struct PyModuleDef _testcapimodule = {
     PyModuleDef_HEAD_INIT,
     .m_name = "_testcapi",
@@ -3362,6 +3386,14 @@ PyInit__testcapi(void)
         return NULL;
     }
     if (PyModule_Add(m, "ManagedDictType", managed_dict_type) < 0) {
+        return NULL;
+    }
+
+    PyObject *managed_weakref_type = create_managed_weakref_type();
+    if (managed_weakref_type == NULL) {
+        return NULL;
+    }
+    if (PyModule_Add(m, "ManagedWeakrefType", managed_weakref_type) < 0) {
         return NULL;
     }
 

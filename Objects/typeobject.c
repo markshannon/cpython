@@ -8797,6 +8797,29 @@ type_ready_fill_dict(PyTypeObject *type)
     return 0;
 }
 
+size_t _PyType_Compute_PreHeaderSize(PyTypeObject *tp)
+{
+    return (
+#ifndef Py_GIL_DISABLED
+        (size_t)_PyType_IS_GC(tp) * sizeof(PyGC_Head) +
+#endif
+        (size_t)_PyType_HasFeature(tp, Py_TPFLAGS_PREHEADER) * 2 * sizeof(PyObject *)
+    );
+#if Py_GIL_DISABLED
+    if (_PyType_HasFeature(tp, Py_TPFLAGS_PREHEADER)) {
+        return 2 * sizeof(PyObject *);
+    }
+#else
+    if (_PyType_HasFeature(tp, Py_TPFLAGS_PREHEADER)) {
+        return 4 * sizeof(PyObject *);
+    }
+    if (_PyType_IS_GC(tp)) {
+        return 2 * sizeof(PyObject *);
+    }
+#endif
+    return 0;
+}
+
 static int
 type_ready_preheader(PyTypeObject *type)
 {
@@ -8822,6 +8845,7 @@ type_ready_preheader(PyTypeObject *type)
         }
         type->tp_weaklistoffset = MANAGED_WEAKREF_OFFSET;
     }
+    type->tp_pre_header_size = _PyType_Compute_PreHeaderSize(type);
     return 0;
 }
 

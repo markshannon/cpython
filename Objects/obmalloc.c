@@ -1423,6 +1423,13 @@ PyObject_Free(void *ptr)
     _PyObject.free(_PyObject.ctx, ptr);
 }
 
+void
+PyBaseObject_Free(void *ptr)
+{
+    OBJECT_STAT_INC(frees);
+    _PyObject.free(_PyObject.ctx, ptr);
+}
+
 
 /* If we're using GCC, use __builtin_expect() to reduce overhead of
    the valgrind checks */

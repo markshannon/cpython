@@ -851,15 +851,13 @@ _PyObject_HashFast(PyObject *op)
     return PyObject_Hash(op);
 }
 
+extern size_t _PyType_Compute_PreHeaderSize(PyTypeObject *tp);
+
 static inline size_t
 _PyType_PreHeaderSize(PyTypeObject *tp)
 {
-    return (
-#ifndef Py_GIL_DISABLED
-        (size_t)_PyType_IS_GC(tp) * sizeof(PyGC_Head) +
-#endif
-        (size_t)_PyType_HasFeature(tp, Py_TPFLAGS_PREHEADER) * 2 * sizeof(PyObject *)
-    );
+    assert(tp->tp_pre_header_size == _PyType_Compute_PreHeaderSize(tp));
+    return tp->tp_pre_header_size;
 }
 
 void _PyObject_GC_Link(PyObject *op);
