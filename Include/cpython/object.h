@@ -232,6 +232,7 @@ struct _typeobject {
 
     /* bitset of which type-watchers care about this type */
     unsigned char tp_watched;
+    unsigned char tp_pre_header_size;
 
     /* Number of tp_version_tag values used.
      * Set to _Py_ATTR_CACHE_UNUSED if the attribute cache is
