@@ -301,9 +301,7 @@ dummy_func(
         }
 
         replicate(4) inst(LOAD_SMALL_INT, (-- value)) {
-            assert(oparg < _PY_NSMALLPOSINTS);
-            PyObject *obj = (PyObject *)&_PyLong_SMALL_INTS[_PY_NSMALLNEGINTS + oparg];
-            value = PyStackRef_FromPyObjectBorrow(obj);
+            value = PyStackRef_TagInt(oparg);
         }
 
         replicate(8) inst(STORE_FAST, (value --)) {
@@ -457,33 +455,27 @@ dummy_func(
         }
 
         inst(TO_BOOL_INT, (unused/1, unused/2, value -- res)) {
-            PyObject *value_o = PyStackRef_AsPyObjectBorrow(value);
-            EXIT_IF(!PyLong_CheckExact(value_o));
+            EXIT_IF(!PyStackRef_IsTaggedInt(value));
             STAT_INC(TO_BOOL, hit);
-            if (_PyLong_IsZero((PyLongObject *)value_o)) {
-                assert(_Py_IsImmortal(value_o));
-                DEAD(value);
+            DEAD(value);
+            if (PyStackRef_IsTaggedZero(value)) {
                 res = PyStackRef_False;
             }
             else {
-                PyStackRef_CLOSE(value);
                 res = PyStackRef_True;
             }
         }
 
         op(_GUARD_NOS_LIST, (nos, unused -- nos, unused)) {
-            PyObject *o = PyStackRef_AsPyObjectBorrow(nos);
-            EXIT_IF(!PyList_CheckExact(o));
+            EXIT_IF(!PyStackRef_ListCheckExact(nos));
         }
 
         op(_GUARD_TOS_LIST, (tos -- tos)) {
-            PyObject *o = PyStackRef_AsPyObjectBorrow(tos);
-            EXIT_IF(!PyList_CheckExact(o));
+            EXIT_IF(!PyStackRef_ListCheckExact(tos));
         }
 
         op(_GUARD_TOS_SLICE, (tos -- tos)) {
-            PyObject *o = PyStackRef_AsPyObjectBorrow(tos);
-            EXIT_IF(!PySlice_Check(o));
+            EXIT_IF(!PyStackRef_SliceCheck(tos));
         }
 
         macro(TO_BOOL_LIST) = _GUARD_TOS_LIST + unused/1 + unused/2 + _TO_BOOL_LIST;
@@ -506,17 +498,16 @@ dummy_func(
 
         op(_GUARD_NOS_UNICODE, (nos, unused -- nos, unused)) {
             PyObject *o = PyStackRef_AsPyObjectBorrow(nos);
-            EXIT_IF(!PyUnicode_CheckExact(o));
+            EXIT_IF(!PyStackRef_UnicodeCheckExact(nos));
         }
 
         op(_GUARD_TOS_UNICODE, (value -- value)) {
-            PyObject *value_o = PyStackRef_AsPyObjectBorrow(value);
-            EXIT_IF(!PyUnicode_CheckExact(value_o));
+            EXIT_IF(!PyStackRef_UnicodeCheckExact(value));
         }
 
         op(_TO_BOOL_STR, (value -- res)) {
             STAT_INC(TO_BOOL, hit);
-            PyObject *value_o = PyStackRef_AsPyObjectBorrow(value);
+            PyObject *value_o = PyStackRef_AsPyObjectBorrowNotInt(value);
             if (value_o == &_Py_STR(empty)) {
                 assert(_Py_IsImmortal(value_o));
                 DEAD(value);
@@ -543,10 +534,15 @@ dummy_func(
             _REPLACE_WITH_TRUE;
 
         inst(UNARY_INVERT, (value -- res)) {
-            PyObject *res_o = PyNumber_Invert(PyStackRef_AsPyObjectBorrow(value));
-            PyStackRef_CLOSE(value);
-            ERROR_IF(res_o == NULL);
-            res = PyStackRef_FromPyObjectSteal(res_o);
+            if (PyStackRef_IsTaggedInt(value)) {
+                res = PyStackRef_TagInt(~PyStackRef_UntagInt(value));
+            }
+            else {
+                PyObject *res_o = PyNumber_Invert(PyStackRef_AsPyObjectBorrowNotInt(value));
+                PyStackRef_CLOSE(value);
+                ERROR_IF(res_o == NULL);
+                res = PyStackRef_FromPyObjectSteal(res_o);
+            }
         }
 
         family(BINARY_OP, INLINE_CACHE_ENTRIES_BINARY_OP) = {
@@ -1467,13 +1463,14 @@ dummy_func(
                 PyStackRef_CLOSE(v);
                 ERROR_IF(true);
             }
+            PyObject *value = PyStackRef_AsPyObjectSteal(v);
             if (PyDict_CheckExact(ns)) {
-                err = PyDict_SetItem(ns, name, PyStackRef_AsPyObjectBorrow(v));
+                err = PyDict_SetItem(ns, name, value);
             }
             else {
-                err = PyObject_SetItem(ns, name, PyStackRef_AsPyObjectBorrow(v));
+                err = PyObject_SetItem(ns, name, value);
             }
-            PyStackRef_CLOSE(v);
+            Py_DECREF(value);
             ERROR_IF(err);
         }
 

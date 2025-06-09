@@ -283,6 +283,13 @@ PyStackRef_IsTaggedInt(_PyStackRef i)
     return (i.bits & Py_TAG_BITS) == Py_INT_TAG;
 }
 
+
+static inline bool
+PyStackRef_IsTaggedZero(_PyStackRef i)
+{
+    return i.bits == Py_INT_TAG;
+}
+
 static inline _PyStackRef
 PyStackRef_TagInt(intptr_t i)
 {
@@ -297,7 +304,6 @@ PyStackRef_UntagInt(_PyStackRef i)
     intptr_t val = (intptr_t)i.bits;
     return Py_ARITHMETIC_RIGHT_SHIFT(intptr_t, val, 2);
 }
-
 
 static inline _PyStackRef
 PyStackRef_IncrementTaggedIntNoOverflow(_PyStackRef ref)
@@ -351,6 +357,13 @@ static inline PyObject *
 PyStackRef_AsPyObjectSteal(_PyStackRef stackref)
 {
     assert(!PyStackRef_IsNull(stackref));
+    if (PyStackRef_IsTaggedInt(ref)) {
+        PyObject *boxed = PyLong_FromSsize_t(PyStackRef_UntagInt(ref));
+        if (boxed == NULL) {
+            Py_FatalError("Unable to box int");
+        }
+        return boxed;
+    }
     if (PyStackRef_IsDeferred(stackref)) {
         return Py_NewRef(PyStackRef_AsPyObjectBorrow(stackref));
     }
@@ -545,6 +558,14 @@ PyStackRef_RefcountOnObject(_PyStackRef ref)
 }
 
 static inline PyObject *
+PyStackRef_AsPyObjectBorrowNotInt(_PyStackRef ref)
+{
+    assert(!PyStackRef_IsTaggedInt(ref));
+    return BITS_TO_PTR_MASKED(ref);
+}
+
+
+static inline PyObject *
 PyStackRef_AsPyObjectBorrow(_PyStackRef ref)
 {
     assert(!PyStackRef_IsTaggedInt(ref));
@@ -561,6 +582,13 @@ PyStackRef_Borrow(_PyStackRef ref)
 static inline PyObject *
 PyStackRef_AsPyObjectSteal(_PyStackRef ref)
 {
+    if (PyStackRef_IsTaggedInt(ref)) {
+        PyObject *boxed = PyLong_FromSsize_t(PyStackRef_UntagInt(ref));
+        if (boxed == NULL) {
+            Py_FatalError("Unable to box int");
+        }
+        return boxed;
+    }
     if (PyStackRef_RefcountOnObject(ref)) {
         return BITS_TO_PTR(ref);
     }
@@ -747,11 +775,23 @@ PyStackRef_TYPE(_PyStackRef stackref) {
         return Py ## T ## _Check(PyStackRef_AsPyObjectBorrow(stackref)); \
     }
 
+#define STACKREF_CHECK_EXACT_FUNC(T) \
+    static inline bool \
+    PyStackRef_ ## T ## CheckExact(_PyStackRef stackref) { \
+        if (PyStackRef_IsTaggedInt(stackref)) { \
+            return false; \
+        } \
+        return Py ## T ## _CheckExact(PyStackRef_AsPyObjectBorrow(stackref)); \
+    }
+
 STACKREF_CHECK_FUNC(Gen)
 STACKREF_CHECK_FUNC(Bool)
 STACKREF_CHECK_FUNC(ExceptionInstance)
 STACKREF_CHECK_FUNC(Code)
 STACKREF_CHECK_FUNC(Function)
+STACKREF_CHECK_FUNC(Slice)
+STACKREF_CHECK_EXACT_FUNC(List)
+STACKREF_CHECK_EXACT_FUNC(Unicode)
 
 static inline bool
 PyStackRef_LongCheck(_PyStackRef stackref)

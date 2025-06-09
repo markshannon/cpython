@@ -824,6 +824,18 @@ object_vacall(PyThreadState *tstate, PyObject *base,
     return result;
 }
 
+static PyObject *
+get_callable(_PyStackRef ref) {
+    if (PyStackRef_IsNull(ref)) {
+        return NULL;
+    }
+    if (PyStackRef_IsTaggedInt(ref)) {
+        PyErr_SetString(PyExc_TypeError, "'int' object is not callable");
+        return NULL;
+    }
+    return PyStackRef_AsPyObjectBorrowNotInt(ref);
+}
+
 
 PyObject *
 PyObject_VectorcallMethod(PyObject *name, PyObject *const *args,
@@ -838,11 +850,11 @@ PyObject_VectorcallMethod(PyObject *name, PyObject *const *args,
     _PyThreadState_PushCStackRef(tstate, &method);
     /* Use args[0] as "self" argument */
     int unbound = _PyObject_GetMethodStackRef(tstate, args[0], name, &method.ref);
-    if (PyStackRef_IsNull(method.ref)) {
+    PyObject *callable = get_callable(method.ref);
+    if (callable == NULL) {
         _PyThreadState_PopCStackRef(tstate, &method);
         return NULL;
     }
-    PyObject *callable = PyStackRef_AsPyObjectBorrow(method.ref);
 
     if (unbound) {
         /* We must remove PY_VECTORCALL_ARGUMENTS_OFFSET since
@@ -874,11 +886,11 @@ PyObject_CallMethodObjArgs(PyObject *obj, PyObject *name, ...)
     _PyCStackRef method;
     _PyThreadState_PushCStackRef(tstate, &method);
     int is_method = _PyObject_GetMethodStackRef(tstate, obj, name, &method.ref);
-    if (PyStackRef_IsNull(method.ref)) {
+    PyObject *callable = get_callable(method.ref);
+    if (callable == NULL) {
         _PyThreadState_PopCStackRef(tstate, &method);
         return NULL;
     }
-    PyObject *callable = PyStackRef_AsPyObjectBorrow(method.ref);
     obj = is_method ? obj : NULL;
 
     va_list vargs;
@@ -906,11 +918,11 @@ _PyObject_CallMethodIdObjArgs(PyObject *obj, _Py_Identifier *name, ...)
     _PyCStackRef method;
     _PyThreadState_PushCStackRef(tstate, &method);
     int is_method = _PyObject_GetMethodStackRef(tstate, obj, oname, &method.ref);
-    if (PyStackRef_IsNull(method.ref)) {
+    PyObject *callable = get_callable(method.ref);
+    if (callable == NULL) {
         _PyThreadState_PopCStackRef(tstate, &method);
         return NULL;
     }
-    PyObject *callable = PyStackRef_AsPyObjectBorrow(method.ref);
 
     obj = is_method ? obj : NULL;
 

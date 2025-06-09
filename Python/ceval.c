@@ -164,7 +164,7 @@ dump_item(_PyStackRef item)
         printf("%" PRId64, (int64_t)PyStackRef_UntagInt(item));
         return;
     }
-    PyObject *obj = PyStackRef_AsPyObjectBorrow(item);
+    PyObject *obj = PyStackRef_AsPyObjectBorrowNotInt(item);
     if (obj == NULL) {
         printf("<nil>");
         return;
