@@ -232,9 +232,11 @@ static inline void _PyObject_GC_TRACK(
     _PyObject_ASSERT_FROM(op, !_PyObject_GC_IS_TRACKED(op),
                           "object already tracked by the garbage collector",
                           filename, lineno, __func__);
+    assert(Py_TYPE(op)->tp_flags & Py_TPFLAGS_HAVE_GC);
 #ifdef Py_GIL_DISABLED
     _PyObject_SET_GC_BITS(op, _PyGC_BITS_TRACKED);
 #else
+    assert(PyObject_IS_GC(op));
     PyGC_Head *gc = _Py_AS_GC(op);
     _PyObject_ASSERT_FROM(op,
                           (gc->_gc_prev & _PyGC_PREV_MASK_COLLECTING) == 0,
@@ -242,13 +244,12 @@ static inline void _PyObject_GC_TRACK(
                           filename, lineno, __func__);
 
     PyInterpreterState *interp = _PyInterpreterState_GET();
-    PyGC_Head *generation0 = &interp->gc.young.head;
-    PyGC_Head *last = (PyGC_Head*)(generation0->_gc_prev);
+    PyGC_Head *live = &interp->gc.live.head;
+    PyGC_Head *last = (PyGC_Head*)(live->_gc_prev);
     _PyGCHead_SET_NEXT(last, gc);
     _PyGCHead_SET_PREV(gc, last);
-    uintptr_t not_visited = 1 ^ interp->gc.visited_space;
-    gc->_gc_next = ((uintptr_t)generation0) | not_visited;
-    generation0->_gc_prev = (uintptr_t)gc;
+    gc->_gc_next = (uintptr_t)live;
+    live->_gc_prev = (uintptr_t)gc;
     assert(op->ob_flags & _Py_GC_OBJECT);
     op->ob_flags |= _Py_GC_TRACKED;
 #endif
@@ -274,7 +275,7 @@ static inline void _PyObject_GC_UNTRACK(
     _PyObject_ASSERT_FROM(op, _PyObject_GC_IS_TRACKED(op),
                           "object not tracked by the garbage collector",
                           filename, lineno, __func__);
-
+    assert(Py_TYPE(op)->tp_flags & Py_TPFLAGS_HAVE_GC);
 #ifdef Py_GIL_DISABLED
     _PyObject_CLEAR_GC_BITS(op, _PyGC_BITS_TRACKED);
 #else

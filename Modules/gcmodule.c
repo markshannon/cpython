@@ -159,13 +159,7 @@ gc_set_threshold_impl(PyObject *module, int threshold0, int group_right_1,
 {
     GCState *gcstate = get_gc_state();
 
-    gcstate->young.threshold = threshold0;
-    if (group_right_1) {
-        gcstate->old[0].threshold = threshold1;
-    }
-    if (group_right_2) {
-        gcstate->old[1].threshold = threshold2;
-    }
+    gcstate->threshold = threshold0;
     Py_RETURN_NONE;
 }
 
@@ -181,8 +175,8 @@ gc_get_threshold_impl(PyObject *module)
 {
     GCState *gcstate = get_gc_state();
     return Py_BuildValue("(iii)",
-                         gcstate->young.threshold,
-                         gcstate->old[0].threshold,
+                         gcstate->threshold,
+                         0,
                          0);
 }
 
@@ -207,10 +201,11 @@ gc_get_count_impl(PyObject *module)
     gc->alloc_count = 0;
 #endif
 
+    // TO DO -- get actual counts
     return Py_BuildValue("(iii)",
-                         gcstate->young.count,
-                         gcstate->old[gcstate->visited_space].count,
-                         gcstate->old[gcstate->visited_space^1].count);
+                         0,
+                         0,
+                         0);
 }
 
 /*[clinic input]

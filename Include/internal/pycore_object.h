@@ -252,35 +252,10 @@ _Py_DECREF_SPECIALIZED(PyObject *op, const destructor destruct)
     }
 }
 
-static inline void
-_Py_DECREF_NO_DEALLOC(PyObject *op)
-{
-    if (_Py_IsImmortal(op)) {
-        _Py_DECREF_IMMORTAL_STAT_INC();
-        return;
-    }
-    _Py_DECREF_STAT_INC();
-#ifdef Py_REF_DEBUG
-    _Py_DEC_REFTOTAL(PyInterpreterState_Get());
-#endif
-    op->ob_refcnt--;
-#ifdef Py_DEBUG
-    if (op->ob_refcnt <= 0) {
-        _Py_FatalRefcountError("Expected a positive remaining refcount");
-    }
-#endif
-}
-
 #else
 // TODO: implement Py_DECREF specializations for Py_GIL_DISABLED build
 static inline void
 _Py_DECREF_SPECIALIZED(PyObject *op, const destructor destruct)
-{
-    Py_DECREF(op);
-}
-
-static inline void
-_Py_DECREF_NO_DEALLOC(PyObject *op)
 {
     Py_DECREF(op);
 }
@@ -434,9 +409,12 @@ _Py_DECREF_CODE(PyCodeObject *co)
 #endif
 
 #ifndef Py_GIL_DISABLED
+
+extern void _Py_CandidateCycleRoot(PyObject *op);
+
 #ifdef Py_REF_DEBUG
 
-static inline void Py_DECREF_MORTAL(const char *filename, int lineno, PyObject *op)
+static inline void Py_DecrefMortal(const char *filename, int lineno, PyObject *op)
 {
     if (op->ob_refcnt <= 0) {
         _Py_NegativeRefcount(filename, lineno, op);
@@ -449,8 +427,13 @@ static inline void Py_DECREF_MORTAL(const char *filename, int lineno, PyObject *
     if (--op->ob_refcnt == 0) {
         _Py_Dealloc(op);
     }
+    else {
+        if (PyObject_GC_IsTracked(op)) {
+            _Py_CandidateCycleRoot(op);
+        }
+    }
 }
-#define Py_DECREF_MORTAL(op) Py_DECREF_MORTAL(__FILE__, __LINE__, _PyObject_CAST(op))
+#define Py_DECREF_MORTAL(op) Py_DecrefMortal(__FILE__, __LINE__, _PyObject_CAST(op))
 
 static inline void _Py_DECREF_MORTAL_SPECIALIZED(const char *filename, int lineno, PyObject *op, destructor destruct)
 {
@@ -459,6 +442,7 @@ static inline void _Py_DECREF_MORTAL_SPECIALIZED(const char *filename, int linen
     }
     _Py_DECREF_STAT_INC();
     assert(!_Py_IsStaticImmortal(op));
+    assert(!PyObject_IS_GC(op));
     if (!_Py_IsImmortal(op)) {
         _Py_DECREF_DecRefTotal();
     }
@@ -474,13 +458,14 @@ static inline void _Py_DECREF_MORTAL_SPECIALIZED(const char *filename, int linen
 
 #else
 
-extern Py_NO_INLINE PyAPI_FUNC(void) Py_DECREF_MORTAL(PyObject *op);
+PyAPI_FUNC(void) Py_DECREF_MORTAL(PyObject *op);
 
 #define Py_DECREF_MORTAL(op) Py_DECREF_MORTAL(_PyObject_CAST(op))
 
 static inline void Py_DECREF_MORTAL_SPECIALIZED(PyObject *op, destructor destruct)
 {
     assert(!_Py_IsStaticImmortal(op));
+    assert(!PyObject_GC_IsTracked(op));
     _Py_DECREF_STAT_INC();
     if (--op->ob_refcnt == 0) {
         _PyReftracerTrack(op, PyRefTracer_DESTROY);

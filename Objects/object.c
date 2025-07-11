@@ -264,29 +264,33 @@ _Py_AddToAllObjects(PyObject *op)
 }
 #endif  /* Py_TRACE_REFS */
 
-#undef Py_DECREF_MORTAL
-Py_NO_INLINE void Py_DECREF_MORTAL(PyObject *op)
+void Py_DecRef(PyObject *op)
 {
-    assert(!_Py_IsStaticImmortal(op));
-    _Py_DECREF_STAT_INC();
-    if (--op->ob_refcnt == 0) {
-        _Py_Dealloc(op);
-    }
-}
-
-#undef Py_DECREF
-Py_NO_INLINE void Py_DECREF(PyObject *op)
-{
-    // Non-limited C API and limited C API for Python 3.9 and older access
-    // directly PyObject.ob_refcnt.
     if (_Py_IsImmortal(op)) {
         _Py_DECREF_IMMORTAL_STAT_INC();
         return;
     }
     _Py_DECREF_STAT_INC();
+#ifdef Py_REF_DEBUG
+    _Py_DECREF_DecRefTotal();
+#endif
     if (--op->ob_refcnt == 0) {
         _Py_Dealloc(op);
     }
+    else if (PyObject_GC_IsTracked(op)) {
+        assert(_PyType_IS_GC(Py_TYPE(op)));
+        _Py_CandidateCycleRoot(op);
+    }
+}
+
+void Py_DecRefDebug(const char *filename, int lineno, PyObject *op)
+{
+    if (_Py_IsImmortal(op)) {
+        _Py_DECREF_IMMORTAL_STAT_INC();
+        return;
+    }
+    // TO DO --implement properly
+    Py_DecRef(op);
 }
 
 #ifdef Py_REF_DEBUG
@@ -362,12 +366,6 @@ Py_IncRef(PyObject *o)
 }
 
 void
-Py_DecRef(PyObject *o)
-{
-    Py_XDECREF(o);
-}
-
-void
 _Py_IncRef(PyObject *o)
 {
     Py_INCREF(o);
@@ -376,7 +374,7 @@ _Py_IncRef(PyObject *o)
 void
 _Py_DecRef(PyObject *o)
 {
-    Py_DECREF(o);
+    Py_DecRef(o);
 }
 
 #ifdef Py_GIL_DISABLED
