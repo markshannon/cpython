@@ -2956,7 +2956,7 @@ dummy_func(
                     start--;
                 }
                 _PyExecutorObject *executor;
-                int optimized = _PyOptimizer_Optimize(frame, start, &executor, 0);
+                int optimized = _PyOptimizer_Optimize(frame, start, &executor, 0, 0);
                 if (optimized <= 0) {
                     this_instr[1].counter = restart_backoff_counter(counter);
                     ERROR_IF(optimized < 0);
@@ -5254,6 +5254,7 @@ dummy_func(
                     _PyOpcode_OpName[target->op.code]);
             }
         #endif
+            assert(oparg == exit->dynamic);
             tstate->jit_exit = exit;
             GOTO_TIER_TWO(exit->executor);
         }
@@ -5418,7 +5419,7 @@ dummy_func(
                 _PyExecutorObject *previous_executor = _PyExecutor_FromExit(exit);
                 assert(tstate->current_executor == (PyObject *)previous_executor);
                 int chain_depth = previous_executor->vm_data.chain_depth + 1;
-                int optimized = _PyOptimizer_Optimize(frame, target, &executor, chain_depth);
+                int optimized = _PyOptimizer_Optimize(frame, target, &executor, chain_depth, exit->dynamic);
                 if (optimized <= 0) {
                     exit->temperature = restart_backoff_counter(temperature);
                     GOTO_TIER_ONE(optimized < 0 ? NULL : target);
@@ -5428,6 +5429,10 @@ dummy_func(
             assert(tstate->jit_exit == exit);
             exit->executor = executor;
             GOTO_TIER_TWO(exit->executor);
+        }
+
+        tier2 op(_GUARD_IP, (ip/4 -- )) {
+            EXIT_IF(frame->instr_ptr != (_Py_CODEUNIT *)ip);
         }
 
         label(pop_2_error) {

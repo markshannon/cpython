@@ -314,7 +314,7 @@ const uint16_t _PyUop_Flags[MAX_UOP_ID+1] = {
     [_SET_IP] = 0,
     [_CHECK_STACK_SPACE_OPERAND] = HAS_DEOPT_FLAG,
     [_SAVE_RETURN_OFFSET] = HAS_ARG_FLAG,
-    [_EXIT_TRACE] = HAS_ESCAPES_FLAG,
+    [_EXIT_TRACE] = HAS_ARG_FLAG | HAS_ESCAPES_FLAG,
     [_CHECK_VALIDITY] = HAS_DEOPT_FLAG,
     [_LOAD_CONST_INLINE] = HAS_PURE_FLAG,
     [_POP_TOP_LOAD_CONST_INLINE] = HAS_ESCAPES_FLAG | HAS_PURE_FLAG,
@@ -337,6 +337,7 @@ const uint16_t _PyUop_Flags[MAX_UOP_ID+1] = {
     [_ERROR_POP_N] = HAS_ARG_FLAG,
     [_TIER2_RESUME_CHECK] = HAS_DEOPT_FLAG,
     [_COLD_EXIT] = HAS_ESCAPES_FLAG,
+    [_GUARD_IP] = HAS_EXIT_FLAG,
 };
 
 const ReplicationRange _PyUop_Replication[MAX_UOP_ID+1] = {
@@ -472,6 +473,7 @@ const char *const _PyOpcode_uop_name[MAX_UOP_ID+1] = {
     [_GUARD_DORV_NO_DICT] = "_GUARD_DORV_NO_DICT",
     [_GUARD_DORV_VALUES_INST_ATTR_FROM_DICT] = "_GUARD_DORV_VALUES_INST_ATTR_FROM_DICT",
     [_GUARD_GLOBALS_VERSION] = "_GUARD_GLOBALS_VERSION",
+    [_GUARD_IP] = "_GUARD_IP",
     [_GUARD_IS_FALSE_POP] = "_GUARD_IS_FALSE_POP",
     [_GUARD_IS_NONE_POP] = "_GUARD_IS_NONE_POP",
     [_GUARD_IS_NOT_NONE_POP] = "_GUARD_IS_NOT_NONE_POP",
@@ -1304,6 +1306,8 @@ int _PyUop_num_popped(int opcode, int oparg)
         case _TIER2_RESUME_CHECK:
             return 0;
         case _COLD_EXIT:
+            return 0;
+        case _GUARD_IP:
             return 0;
         default:
             return -1;

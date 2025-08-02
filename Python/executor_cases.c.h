@@ -7111,6 +7111,7 @@
         }
 
         case _EXIT_TRACE: {
+            oparg = CURRENT_OPARG();
             PyObject *exit_p = (PyObject *)CURRENT_OPERAND0();
             _PyExitData *exit = (_PyExitData *)exit_p;
             #if defined(Py_DEBUG) && !defined(_Py_JIT)
@@ -7127,6 +7128,7 @@
                 stack_pointer = _PyFrame_GetStackPointer(frame);
             }
             #endif
+            assert(oparg == exit->dynamic);
             tstate->jit_exit = exit;
             GOTO_TIER_TWO(exit->executor);
             break;
@@ -7491,7 +7493,7 @@
                 assert(tstate->current_executor == (PyObject *)previous_executor);
                 int chain_depth = previous_executor->vm_data.chain_depth + 1;
                 _PyFrame_SetStackPointer(frame, stack_pointer);
-                int optimized = _PyOptimizer_Optimize(frame, target, &executor, chain_depth);
+                int optimized = _PyOptimizer_Optimize(frame, target, &executor, chain_depth, exit->dynamic);
                 stack_pointer = _PyFrame_GetStackPointer(frame);
                 if (optimized <= 0) {
                     exit->temperature = restart_backoff_counter(temperature);
@@ -7502,6 +7504,15 @@
             assert(tstate->jit_exit == exit);
             exit->executor = executor;
             GOTO_TIER_TWO(exit->executor);
+            break;
+        }
+
+        case _GUARD_IP: {
+            PyObject *ip = (PyObject *)CURRENT_OPERAND0();
+            if (frame->instr_ptr != (_Py_CODEUNIT *)ip) {
+                UOP_STAT_INC(uopcode, miss);
+                JUMP_TO_JUMP_TARGET();
+            }
             break;
         }
 

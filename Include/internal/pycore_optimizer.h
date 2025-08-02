@@ -69,6 +69,7 @@ typedef struct {
 
 typedef struct _PyExitData {
     uint32_t target;
+    uint8_t dynamic;
     uint16_t index;
     _Py_BackoffCounter temperature;
     struct _PyExecutorObject *executor;
@@ -353,7 +354,7 @@ extern int _Py_uop_frame_pop(JitOptContext *ctx);
 
 PyAPI_FUNC(PyObject *) _Py_uop_symbols_test(PyObject *self, PyObject *ignored);
 
-PyAPI_FUNC(int) _PyOptimizer_Optimize(_PyInterpreterFrame *frame, _Py_CODEUNIT *start, _PyExecutorObject **exec_ptr, int chain_depth);
+PyAPI_FUNC(int) _PyOptimizer_Optimize(_PyInterpreterFrame *frame, _Py_CODEUNIT *start, _PyExecutorObject **exec_ptr, int chain_depth, int dynamic);
 
 static inline _PyExecutorObject *_PyExecutor_FromExit(_PyExitData *exit)
 {

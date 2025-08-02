@@ -104,7 +104,7 @@ make_executor_from_uops(_PyUOpInstruction *buffer, int length, const _PyBloomFil
 static int
 uop_optimize(_PyInterpreterFrame *frame, _Py_CODEUNIT *instr,
              _PyExecutorObject **exec_ptr, int curr_stackentries,
-             bool progress_needed);
+             bool progress_needed, int dynamic);
 
 /* Returns 1 if optimized, 0 if not optimized, and -1 for an error.
  * If optimized, *executor_ptr contains a new reference to the executor
@@ -112,7 +112,7 @@ uop_optimize(_PyInterpreterFrame *frame, _Py_CODEUNIT *instr,
 int
 _PyOptimizer_Optimize(
     _PyInterpreterFrame *frame, _Py_CODEUNIT *start,
-    _PyExecutorObject **executor_ptr, int chain_depth)
+    _PyExecutorObject **executor_ptr, int chain_depth, int dynamic)
 {
     _PyStackRef *stack_pointer = frame->stackpointer;
     assert(_PyInterpreterState_GET()->jit);
@@ -127,7 +127,7 @@ _PyOptimizer_Optimize(
     if (progress_needed && !has_space_for_executor(code, start)) {
         return 0;
     }
-    int err = uop_optimize(frame, start, executor_ptr, (int)(stack_pointer - _PyFrame_Stackbase(frame)), progress_needed);
+    int err = uop_optimize(frame, start, executor_ptr, (int)(stack_pointer - _PyFrame_Stackbase(frame)), progress_needed, dynamic);
     if (err <= 0) {
         return err;
     }
@@ -544,13 +544,13 @@ add_to_trace(
  */
 static int
 translate_bytecode_to_trace(
-    _PyInterpreterFrame *frame,
-    _Py_CODEUNIT *instr,
-    _PyUOpInstruction *trace,
-    int buffer_size,
-    _PyBloomFilter *dependencies, bool progress_needed)
+    _PyInterpreterFrame *frame, _Py_CODEUNIT *instr,
+    _PyUOpInstruction *trace, int buffer_size,
+    _PyBloomFilter *dependencies, bool progress_needed,
+    int dynamic)
 {
     bool first = true;
+    int dynamic_exit = 0;
     PyCodeObject *code = _PyFrame_GetCode(frame);
     PyFunctionObject *func = _PyFrame_GetFunction(frame);
     assert(PyFunction_Check(func));
@@ -584,6 +584,9 @@ translate_bytecode_to_trace(
             code->co_firstlineno,
             2 * INSTR_IP(initial_instr, code));
     ADD_TO_TRACE(_START_EXECUTOR, 0, (uintptr_t)instr, INSTR_IP(instr, code));
+    if (dynamic) {
+        ADD_TO_TRACE(_GUARD_IP, 0, (uintptr_t)instr, 0);
+    }
     ADD_TO_TRACE(_MAKE_WARM, 0, 0, 0);
     uint32_t target = 0;
 
@@ -732,17 +735,6 @@ translate_bytecode_to_trace(
                     // Reserve space for nuops (+ _SET_IP + _EXIT_TRACE)
                     int nuops = expansion->nuops;
                     RESERVE(nuops + 1); /* One extra for exit */
-                    int16_t last_op = expansion->uops[nuops-1].uop;
-                    if (last_op == _RETURN_VALUE || last_op == _RETURN_GENERATOR || last_op == _YIELD_VALUE) {
-                        // Check for trace stack underflow now:
-                        // We can't bail e.g. in the middle of
-                        // LOAD_CONST + _RETURN_VALUE.
-                        if (trace_stack_depth == 0) {
-                            DPRINTF(2, "Trace stack underflow\n");
-                            OPT_STAT_INC(trace_stack_underflow);
-                            return 0;
-                        }
-                    }
                     uint32_t orig_oparg = oparg;  // For OPARG_TOP/BOTTOM
                     for (int i = 0; i < nuops; i++) {
                         oparg = orig_oparg;
@@ -810,26 +802,32 @@ translate_bytecode_to_trace(
                         }
 
                         if (uop == _RETURN_VALUE || uop == _RETURN_GENERATOR || uop == _YIELD_VALUE) {
-                            TRACE_STACK_POP();
-                            /* Set the operand to the function or code object returned to,
-                             * to assist optimization passes. (See _PUSH_FRAME below.)
-                             */
-                            if (func != NULL) {
-                                operand = (uintptr_t)func;
-                            }
-                            else if (code != NULL) {
-                                operand = (uintptr_t)code | 1;
+                            if (trace_stack_depth == 0) {
+                                // Underflow
+                                dynamic_exit = 1;
                             }
                             else {
-                                operand = 0;
+                                TRACE_STACK_POP();
+                                /* Set the operand to the function or code object returned to,
+                                * to assist optimization passes. (See _PUSH_FRAME below.)
+                                */
+                                if (func != NULL) {
+                                    operand = (uintptr_t)func;
+                                }
+                                else if (code != NULL) {
+                                    operand = (uintptr_t)code | 1;
+                                }
+                                else {
+                                    operand = 0;
+                                }
+                                DPRINTF(2,
+                                    "Returning to %s (%s:%d) at byte offset %d\n",
+                                    PyUnicode_AsUTF8(code->co_qualname),
+                                    PyUnicode_AsUTF8(code->co_filename),
+                                    code->co_firstlineno,
+                                    2 * INSTR_IP(instr, code));
                             }
                             ADD_TO_TRACE(uop, oparg, operand, target);
-                            DPRINTF(2,
-                                "Returning to %s (%s:%d) at byte offset %d\n",
-                                PyUnicode_AsUTF8(code->co_qualname),
-                                PyUnicode_AsUTF8(code->co_filename),
-                                code->co_firstlineno,
-                                2 * INSTR_IP(instr, code));
                             goto top;
                         }
 
@@ -965,7 +963,7 @@ done:
     if (!is_terminator(&trace[trace_length-1])) {
         /* Allow space for _EXIT_TRACE */
         max_length += 2;
-        ADD_TO_TRACE(_EXIT_TRACE, 0, 0, target);
+        ADD_TO_TRACE(_EXIT_TRACE, dynamic_exit, 0, target);
     }
     DPRINTF(1,
             "Created a proto-trace for %s (%s:%d) at byte offset %d -- length %d\n",
@@ -1184,6 +1182,7 @@ make_executor_from_uops(_PyUOpInstruction *buffer, int length, const _PyBloomFil
     /* Initialize exits */
     _PyExecutorObject *cold = _PyExecutor_GetColdExecutor();
     for (int i = 0; i < exit_count; i++) {
+        executor->exits[i].dynamic = 0;
         executor->exits[i].index = i;
         executor->exits[i].temperature = initial_temperature_backoff_counter();
         executor->exits[i].executor = cold;
@@ -1266,13 +1265,13 @@ uop_optimize(
     _Py_CODEUNIT *instr,
     _PyExecutorObject **exec_ptr,
     int curr_stackentries,
-    bool progress_needed)
+    bool progress_needed, int dynamic)
 {
     _PyBloomFilter dependencies;
     _Py_BloomFilter_Init(&dependencies);
     _PyUOpInstruction buffer[UOP_MAX_TRACE_LENGTH];
     OPT_STAT_INC(attempts);
-    int length = translate_bytecode_to_trace(frame, instr, buffer, UOP_MAX_TRACE_LENGTH, &dependencies, progress_needed);
+    int length = translate_bytecode_to_trace(frame, instr, buffer, UOP_MAX_TRACE_LENGTH, &dependencies, progress_needed, dynamic);
     if (length <= 0) {
         // Error or nothing translated
         return length;
