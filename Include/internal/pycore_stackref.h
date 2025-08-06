@@ -91,6 +91,12 @@ PyStackRef_IsValid(_PyStackRef ref)
     return !PyStackRef_IsError(ref) && !PyStackRef_IsNull(ref);
 }
 
+static inline bool
+PyStackRef_IsMalformed(_PyStackRef ref)
+{
+    return false;
+}
+
 static inline int
 PyStackRef_IsTrue(_PyStackRef ref)
 {
@@ -301,6 +307,12 @@ PyStackRef_IsValid(_PyStackRef ref)
 {
     /* Invalid values are ERROR and NULL */
     return ref.bits >= Py_INT_TAG;
+}
+
+static inline bool
+PyStackRef_IsMalformed(_PyStackRef ref)
+{
+    return (ref.bits & Py_TAG_BITS) == Py_TAG_INVALID && !PyStackRef_IsError(ref);
 }
 
 static inline bool

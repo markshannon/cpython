@@ -111,6 +111,7 @@ class Emitter:
     def __init__(self, out: CWriter, labels: dict[str, Label], cannot_escape: bool = False):
         self._replacers = {
             "EXIT_IF": self.exit_if,
+            "DYNAMIC_EXIT_IF": self.exit_if,
             "DEOPT_IF": self.deopt_if,
             "ERROR_IF": self.error_if,
             "ERROR_NO_POP": self.error_no_pop,
@@ -694,6 +695,8 @@ def cflags(p: Properties) -> str:
         flags.append("HAS_DEOPT_FLAG")
     if p.side_exit:
         flags.append("HAS_EXIT_FLAG")
+    if p.dynamic_exit:
+        flags.append("HAS_DYNAMIC_EXIT_FLAG")
     if not p.infallible:
         flags.append("HAS_ERROR_FLAG")
     if p.error_without_pop:

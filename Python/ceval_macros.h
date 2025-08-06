@@ -204,7 +204,11 @@ GETITEM(PyObject *v, Py_ssize_t i) {
  * and skipped instructions.
  */
 #define JUMPBY(x)       (next_instr += (x))
-#define SKIP_OVER(x)    (next_instr += (x))
+#define SKIP_OVER(OP) \
+do {\
+    assert(next_instr->op.code == (OP)); \
+    next_instr++; \
+} while (0);
 
 #define STACK_LEVEL()     ((int)(stack_pointer - _PyFrame_Stackbase(frame)))
 #define STACK_SIZE()      (_PyFrame_GetCode(frame)->co_stacksize)
@@ -378,7 +382,6 @@ do { \
     OPT_STAT_INC(traces_executed); \
     _PyExecutorObject *_executor = (EXECUTOR); \
     next_uop = _executor->trace; \
-    assert(next_uop->opcode == _START_EXECUTOR || next_uop->opcode == _COLD_EXIT); \
     goto enter_tier_two; \
 } while (0)
 #endif
@@ -386,8 +389,8 @@ do { \
 #define GOTO_TIER_ONE(TARGET)                                         \
     do                                                                \
     {                                                                 \
-        tstate->current_executor = NULL;                              \
         next_instr = (TARGET);                                        \
+        tstate->current_executor = NULL;                              \
         OPT_HIST(trace_uop_execution_counter, trace_run_length_hist); \
         _PyFrame_SetStackPointer(frame, stack_pointer);               \
         stack_pointer = _PyFrame_GetStackPointer(frame);              \

@@ -1219,51 +1219,7 @@
             break;
         }
 
-        case _BINARY_OP_INPLACE_ADD_UNICODE: {
-            _PyStackRef right;
-            _PyStackRef left;
-            right = stack_pointer[-1];
-            left = stack_pointer[-2];
-            PyObject *left_o = PyStackRef_AsPyObjectBorrow(left);
-            assert(PyUnicode_CheckExact(left_o));
-            assert(PyUnicode_CheckExact(PyStackRef_AsPyObjectBorrow(right)));
-            int next_oparg;
-            #if TIER_ONE
-            assert(next_instr->op.code == STORE_FAST);
-            next_oparg = next_instr->op.arg;
-            #else
-            next_oparg = CURRENT_OPERAND0();
-            #endif
-            _PyStackRef *target_local = &GETLOCAL(next_oparg);
-            assert(PyUnicode_CheckExact(left_o));
-            if (PyStackRef_AsPyObjectBorrow(*target_local) != left_o) {
-                UOP_STAT_INC(uopcode, miss);
-                JUMP_TO_JUMP_TARGET();
-            }
-            STAT_INC(BINARY_OP, hit);
-            assert(Py_REFCNT(left_o) >= 2 || !PyStackRef_IsHeapSafe(left));
-            PyStackRef_CLOSE_SPECIALIZED(left, _PyUnicode_ExactDealloc);
-            PyObject *temp = PyStackRef_AsPyObjectSteal(*target_local);
-            PyObject *right_o = PyStackRef_AsPyObjectSteal(right);
-            stack_pointer += -2;
-            assert(WITHIN_STACK_BOUNDS());
-            _PyFrame_SetStackPointer(frame, stack_pointer);
-            PyUnicode_Append(&temp, right_o);
-            stack_pointer = _PyFrame_GetStackPointer(frame);
-            *target_local = PyStackRef_FromPyObjectSteal(temp);
-            _PyFrame_SetStackPointer(frame, stack_pointer);
-            Py_DECREF(right_o);
-            stack_pointer = _PyFrame_GetStackPointer(frame);
-            if (PyStackRef_IsNull(*target_local)) {
-                JUMP_TO_ERROR();
-            }
-            #if TIER_ONE
-
-            assert(next_instr->op.code == STORE_FAST);
-            SKIP_OVER(1);
-            #endif
-            break;
-        }
+        /* _BINARY_OP_INPLACE_ADD_UNICODE is not a viable micro-op for tier 2 because it uses the 'next_instr' variable */
 
         case _GUARD_BINARY_OP_EXTEND: {
             _PyStackRef right;
@@ -2071,13 +2027,14 @@
             break;
         }
 
+        /* _ADVANCE_IP is not a viable micro-op for tier 2 because it is replaced */
+
         case _YIELD_VALUE: {
             _PyStackRef retval;
             _PyStackRef value;
             oparg = CURRENT_OPARG();
             retval = stack_pointer[-1];
             assert(frame->owner != FRAME_OWNED_BY_INTERPRETER);
-            frame->instr_ptr++;
             PyGenObject *gen = _PyGen_GetGeneratorFromFrame(frame);
             assert(FRAME_SUSPENDED_YIELD_FROM == FRAME_SUSPENDED + 1);
             assert(oparg == 0 || oparg == 1);
@@ -6067,8 +6024,7 @@
             }
             #if TIER_ONE
 
-            assert(next_instr->op.code == POP_TOP);
-            SKIP_OVER(1);
+            SKIP_OVER(POP_TOP);
             #endif
             break;
         }
@@ -7115,14 +7071,25 @@
             PyObject *exit_p = (PyObject *)CURRENT_OPERAND0();
             _PyExitData *exit = (_PyExitData *)exit_p;
             #if defined(Py_DEBUG) && !defined(_Py_JIT)
-            _Py_CODEUNIT *target = _PyFrame_GetBytecode(frame) + exit->target;
+            _Py_CODEUNIT *target;
+            if (exit->dynamic == PyJIT_STATIC_EXIT) {
+                target = _PyFrame_GetBytecode(frame) + exit->target;
+            }
+            else if (exit->dynamic == PyJIT_DYNAMIC_EXIT_RETURN) {
+                target = frame->instr_ptr + frame->return_offset;
+            }
+            else {
+                assert(exit->dynamic == PyJIT_DYNAMIC_EXIT_YIELD);
+                target = frame->instr_ptr + 1 + INLINE_CACHE_ENTRIES_SEND;
+            }
             OPT_HIST(trace_uop_execution_counter, trace_run_length_hist);
-            if (frame->lltrace >= 2) {
+            if (frame->lltrace >= 3) {
                 _PyFrame_SetStackPointer(frame, stack_pointer);
                 printf("SIDE EXIT: [UOp ");
                 _PyUOpPrint(&next_uop[-1]);
-                printf(", exit %lu, temp %d, target %d -> %s]\n",
+                printf(", exit %lu, temp %d, kind %d, target %d -> %s]\n",
                        exit - current_executor->exits, exit->temperature.value_and_backoff,
+                       exit->dynamic,
                        (int)(target - _PyFrame_GetBytecode(frame)),
                        _PyOpcode_OpName[target->op.code]);
                 stack_pointer = _PyFrame_GetStackPointer(frame);
@@ -7474,14 +7441,36 @@
         case _COLD_EXIT: {
             _PyExitData *exit = tstate->jit_exit;
             assert(exit != NULL);
-            _Py_CODEUNIT *target = _PyFrame_GetBytecode(frame) + exit->target;
+            _Py_CODEUNIT *target;
+            if (exit->dynamic == PyJIT_STATIC_EXIT) {
+                target = _PyFrame_GetBytecode(frame) + exit->target;
+            }
+            else if (exit->dynamic == PyJIT_DYNAMIC_EXIT_RETURN) {
+                target = frame->instr_ptr + frame->return_offset;
+            }
+            else {
+                assert(exit->dynamic == PyJIT_DYNAMIC_EXIT_YIELD);
+                target = frame->instr_ptr + 1 + INLINE_CACHE_ENTRIES_SEND;
+            }
             _Py_BackoffCounter temperature = exit->temperature;
+            #if defined(Py_DEBUG) && !defined(_Py_JIT)
+            OPT_HIST(trace_uop_execution_counter, trace_run_length_hist);
+            if (frame->lltrace >= 3) {
+                _PyFrame_SetStackPointer(frame, stack_pointer);
+                printf("COLD EXIT: temp %d, kind %d, target %d -> %s]\n",
+                       exit->temperature.value_and_backoff,
+                       exit->dynamic,
+                       (int)(target - _PyFrame_GetBytecode(frame)),
+                       _PyOpcode_OpName[target->op.code]);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
+            }
+            #endif
             if (!backoff_counter_triggers(temperature)) {
                 exit->temperature = advance_backoff_counter(temperature);
                 GOTO_TIER_ONE(target);
             }
             _PyExecutorObject *executor;
-            if (target->op.code == ENTER_EXECUTOR) {
+            if (target->op.code == ENTER_EXECUTOR && exit->dynamic == PyJIT_STATIC_EXIT) {
                 PyCodeObject *code = _PyFrame_GetCode(frame);
                 executor = code->co_executors->executors[target->op.arg];
                 Py_INCREF(executor);
@@ -7507,11 +7496,50 @@
             break;
         }
 
-        case _GUARD_IP: {
-            PyObject *ip = (PyObject *)CURRENT_OPERAND0();
-            if (frame->instr_ptr != (_Py_CODEUNIT *)ip) {
-                UOP_STAT_INC(uopcode, miss);
-                JUMP_TO_JUMP_TARGET();
+        case _GUARD_IP_AFTER_RETURN: {
+            oparg = CURRENT_OPARG();
+            PyObject *executor = (PyObject *)CURRENT_OPERAND0();
+            PyObject *ip = (PyObject *)CURRENT_OPERAND1();
+            #ifndef _Py_JIT
+            current_executor = (_PyExecutorObject*)executor;
+            #endif
+            tstate->current_executor = (PyObject *)executor;
+            assert(oparg == PyJIT_DYNAMIC_EXIT_RETURN);
+            _Py_CODEUNIT *actual_ip = frame->instr_ptr + frame->return_offset;
+            if (!current_executor->vm_data.valid) {
+                assert(tstate->jit_exit->executor == current_executor);
+                assert(tstate->current_executor == executor);
+                _PyFrame_SetStackPointer(frame, stack_pointer);
+                _PyExecutor_ClearExit(tstate->jit_exit);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
+                GOTO_TIER_ONE(actual_ip);
+            }
+            if (actual_ip != (_Py_CODEUNIT *)ip) {
+                GOTO_TIER_ONE(actual_ip);
+            }
+            break;
+        }
+
+        case _GUARD_IP_AFTER_YIELD: {
+            oparg = CURRENT_OPARG();
+            PyObject *executor = (PyObject *)CURRENT_OPERAND0();
+            PyObject *ip = (PyObject *)CURRENT_OPERAND1();
+            #ifndef _Py_JIT
+            current_executor = (_PyExecutorObject*)executor;
+            #endif
+            tstate->current_executor = (PyObject *)executor;
+            assert(oparg == PyJIT_DYNAMIC_EXIT_YIELD);
+            _Py_CODEUNIT *actual_ip = frame->instr_ptr + 1 + INLINE_CACHE_ENTRIES_SEND;
+            if (!current_executor->vm_data.valid) {
+                assert(tstate->jit_exit->executor == current_executor);
+                assert(tstate->current_executor == executor);
+                _PyFrame_SetStackPointer(frame, stack_pointer);
+                _PyExecutor_ClearExit(tstate->jit_exit);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
+                GOTO_TIER_ONE(actual_ip);
+            }
+            if (actual_ip != (_Py_CODEUNIT *)ip) {
+                GOTO_TIER_ONE(actual_ip);
             }
             break;
         }

@@ -776,7 +776,7 @@ dummy_func(void) {
         assert(co != NULL);
         int framesize = co->co_framesize;
         assert(framesize > 0);
-        assert(framesize <= curr_space);
+        assert(framesize <= curr_space || ctx->done);
         curr_space -= framesize;
 
         co = get_code(this_instr);
@@ -800,12 +800,11 @@ dummy_func(void) {
         assert(co != NULL);
         int framesize = co->co_framesize;
         assert(framesize > 0);
-        assert(framesize <= curr_space);
+        assert(framesize <= curr_space || ctx->done);
         curr_space -= framesize;
 
         co = get_code(this_instr);
         if (co == NULL) {
-            // might be impossible, but bailing is still safe
             ctx->done = true;
         }
     }

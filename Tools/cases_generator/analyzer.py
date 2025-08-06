@@ -24,6 +24,7 @@ class Properties:
     jumps: bool
     eval_breaker: bool
     needs_this: bool
+    needs_next: bool
     always_exits: bool
     stores_sp: bool
     uses_co_consts: bool
@@ -31,6 +32,7 @@ class Properties:
     uses_locals: bool
     has_free: bool
     side_exit: bool
+    dynamic_exit: bool
     pure: bool
     uses_opcode: bool
     tier: int | None = None
@@ -62,6 +64,7 @@ class Properties:
             jumps=any(p.jumps for p in properties),
             eval_breaker=any(p.eval_breaker for p in properties),
             needs_this=any(p.needs_this for p in properties),
+            needs_next=any(p.needs_next for p in properties),
             always_exits=any(p.always_exits for p in properties),
             stores_sp=any(p.stores_sp for p in properties),
             uses_co_consts=any(p.uses_co_consts for p in properties),
@@ -70,6 +73,7 @@ class Properties:
             uses_opcode=any(p.uses_opcode for p in properties),
             has_free=any(p.has_free for p in properties),
             side_exit=any(p.side_exit for p in properties),
+            dynamic_exit=any(p.dynamic_exit for p in properties),
             pure=all(p.pure for p in properties),
             needs_prev=any(p.needs_prev for p in properties),
             no_save_ip=all(p.no_save_ip for p in properties),
@@ -89,6 +93,7 @@ SKIP_PROPERTIES = Properties(
     jumps=False,
     eval_breaker=False,
     needs_this=False,
+    needs_next=False,
     always_exits=False,
     stores_sp=False,
     uses_co_consts=False,
@@ -97,6 +102,7 @@ SKIP_PROPERTIES = Properties(
     uses_opcode=False,
     has_free=False,
     side_exit=False,
+    dynamic_exit=False,
     pure=True,
     no_save_ip=False,
 )
@@ -209,6 +215,8 @@ class Uop:
             return "has tier 1 control flow"
         if self.properties.needs_this:
             return "uses the 'this_instr' variable"
+        if self.properties.needs_next:
+            return "uses the 'next_instr' variable"
         if len([c for c in self.caches if c.name != "unused"]) > 2:
             return "has too many cache entries"
         if self.properties.error_with_pop and self.properties.error_without_pop:
@@ -706,7 +714,7 @@ def check_escaping_calls(instr: parser.CodeDef, escapes: dict[SimpleStmt, Escapi
             in_if = 0
             tkn_iter = iter(stmt.contents)
             for tkn in tkn_iter:
-                if tkn.kind == "IDENTIFIER" and tkn.text in ("DEOPT_IF", "ERROR_IF", "EXIT_IF"):
+                if tkn.kind == "IDENTIFIER" and tkn.text in ("DEOPT_IF", "ERROR_IF", "EXIT_IF", "DYNAMIC_EXIT_IF"):
                     in_if = 1
                     next(tkn_iter)
                 elif tkn.kind == "LPAREN":
@@ -832,7 +840,8 @@ def compute_properties(op: parser.CodeDef) -> Properties:
     )
     deopts_if = variable_used(op, "DEOPT_IF")
     exits_if = variable_used(op, "EXIT_IF")
-    if deopts_if and exits_if:
+    dynamic_exit = variable_used(op, "DYNAMIC_EXIT_IF")
+    if sum((deopts_if, exits_if, dynamic_exit)) > 1:
         tkn = op.tokens[0]
         raise lexer.make_syntax_error(
             "Op cannot contain both EXIT_IF and DEOPT_IF",
@@ -853,10 +862,12 @@ def compute_properties(op: parser.CodeDef) -> Properties:
         error_without_pop=error_without_pop,
         deopts=deopts_if,
         side_exit=exits_if,
+        dynamic_exit=dynamic_exit,
         oparg=oparg_used(op),
         jumps=variable_used(op, "JUMPBY"),
         eval_breaker="CHECK_PERIODIC" in op.name,
         needs_this=variable_used(op, "this_instr"),
+        needs_next=variable_used(op, "next_instr"),
         always_exits=always_exits(op),
         stores_sp=variable_used(op, "SYNC_SP"),
         uses_co_consts=variable_used(op, "FRAME_CO_CONSTS"),

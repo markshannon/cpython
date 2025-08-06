@@ -104,7 +104,6 @@ const uint16_t _PyUop_Flags[MAX_UOP_ID+1] = {
     [_BINARY_OP_ADD_FLOAT__NO_DECREF_INPUTS] = HAS_ERROR_FLAG | HAS_PURE_FLAG,
     [_BINARY_OP_SUBTRACT_FLOAT__NO_DECREF_INPUTS] = HAS_ERROR_FLAG | HAS_PURE_FLAG,
     [_BINARY_OP_ADD_UNICODE] = HAS_ERROR_FLAG | HAS_PURE_FLAG,
-    [_BINARY_OP_INPLACE_ADD_UNICODE] = HAS_LOCAL_FLAG | HAS_DEOPT_FLAG | HAS_ERROR_FLAG | HAS_ESCAPES_FLAG,
     [_GUARD_BINARY_OP_EXTEND] = HAS_DEOPT_FLAG | HAS_ESCAPES_FLAG,
     [_BINARY_OP_EXTEND] = HAS_ESCAPES_FLAG,
     [_BINARY_SLICE] = HAS_ERROR_FLAG | HAS_ESCAPES_FLAG,
@@ -337,7 +336,8 @@ const uint16_t _PyUop_Flags[MAX_UOP_ID+1] = {
     [_ERROR_POP_N] = HAS_ARG_FLAG,
     [_TIER2_RESUME_CHECK] = HAS_DEOPT_FLAG,
     [_COLD_EXIT] = HAS_ESCAPES_FLAG,
-    [_GUARD_IP] = HAS_EXIT_FLAG,
+    [_GUARD_IP_AFTER_RETURN] = HAS_ARG_FLAG | HAS_ESCAPES_FLAG,
+    [_GUARD_IP_AFTER_YIELD] = HAS_ARG_FLAG | HAS_ESCAPES_FLAG,
 };
 
 const ReplicationRange _PyUop_Replication[MAX_UOP_ID+1] = {
@@ -357,7 +357,6 @@ const char *const _PyOpcode_uop_name[MAX_UOP_ID+1] = {
     [_BINARY_OP_ADD_INT] = "_BINARY_OP_ADD_INT",
     [_BINARY_OP_ADD_UNICODE] = "_BINARY_OP_ADD_UNICODE",
     [_BINARY_OP_EXTEND] = "_BINARY_OP_EXTEND",
-    [_BINARY_OP_INPLACE_ADD_UNICODE] = "_BINARY_OP_INPLACE_ADD_UNICODE",
     [_BINARY_OP_MULTIPLY_FLOAT] = "_BINARY_OP_MULTIPLY_FLOAT",
     [_BINARY_OP_MULTIPLY_FLOAT__NO_DECREF_INPUTS] = "_BINARY_OP_MULTIPLY_FLOAT__NO_DECREF_INPUTS",
     [_BINARY_OP_MULTIPLY_INT] = "_BINARY_OP_MULTIPLY_INT",
@@ -473,7 +472,8 @@ const char *const _PyOpcode_uop_name[MAX_UOP_ID+1] = {
     [_GUARD_DORV_NO_DICT] = "_GUARD_DORV_NO_DICT",
     [_GUARD_DORV_VALUES_INST_ATTR_FROM_DICT] = "_GUARD_DORV_VALUES_INST_ATTR_FROM_DICT",
     [_GUARD_GLOBALS_VERSION] = "_GUARD_GLOBALS_VERSION",
-    [_GUARD_IP] = "_GUARD_IP",
+    [_GUARD_IP_AFTER_RETURN] = "_GUARD_IP_AFTER_RETURN",
+    [_GUARD_IP_AFTER_YIELD] = "_GUARD_IP_AFTER_YIELD",
     [_GUARD_IS_FALSE_POP] = "_GUARD_IS_FALSE_POP",
     [_GUARD_IS_NONE_POP] = "_GUARD_IS_NONE_POP",
     [_GUARD_IS_NOT_NONE_POP] = "_GUARD_IS_NOT_NONE_POP",
@@ -840,8 +840,6 @@ int _PyUop_num_popped(int opcode, int oparg)
         case _BINARY_OP_SUBTRACT_FLOAT__NO_DECREF_INPUTS:
             return 2;
         case _BINARY_OP_ADD_UNICODE:
-            return 2;
-        case _BINARY_OP_INPLACE_ADD_UNICODE:
             return 2;
         case _GUARD_BINARY_OP_EXTEND:
             return 0;
@@ -1307,7 +1305,9 @@ int _PyUop_num_popped(int opcode, int oparg)
             return 0;
         case _COLD_EXIT:
             return 0;
-        case _GUARD_IP:
+        case _GUARD_IP_AFTER_RETURN:
+            return 0;
+        case _GUARD_IP_AFTER_YIELD:
             return 0;
         default:
             return -1;

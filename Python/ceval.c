@@ -160,6 +160,14 @@ dump_item(_PyStackRef item)
         printf("<NULL>");
         return;
     }
+    if (PyStackRef_IsError(item)) {
+        printf("<ERROR>");
+        return;
+    }
+    if (PyStackRef_IsMalformed(item)) {
+        printf("<malformed>");
+        return;
+    }
     if (PyStackRef_IsTaggedInt(item)) {
         printf("%" PRId64, (int64_t)PyStackRef_UntagInt(item));
         return;
@@ -176,6 +184,14 @@ dump_item(_PyStackRef item)
 static void
 dump_stack(_PyInterpreterFrame *frame, _PyStackRef *stack_pointer)
 {
+    if (frame->owner == FRAME_OWNED_BY_INTERPRETER) {
+        printf("Interpreter Shim Frame");
+        return;
+    }
+    if (frame->owner == FRAME_OWNED_BY_CSTACK) {
+        printf("C Stack Frame");
+        return;
+    }
     _PyFrame_SetStackPointer(frame, stack_pointer);
     _PyStackRef *locals_base = _PyFrame_GetLocalsArray(frame);
     _PyStackRef *stack_base = _PyFrame_Stackbase(frame);
@@ -213,9 +229,9 @@ lltrace_instruction(_PyInterpreterFrame *frame,
                     int opcode,
                     int oparg)
 {
+    dump_stack(frame, stack_pointer);
     int offset = 0;
     if (frame->owner < FRAME_OWNED_BY_INTERPRETER) {
-        dump_stack(frame, stack_pointer);
         offset = (int)(next_instr - _PyFrame_GetBytecode(frame));
     }
     const char *opname = _PyOpcode_OpName[opcode];
@@ -1158,14 +1174,20 @@ enter_tier_two:
     uint64_t trace_uop_execution_counter = 0;
 #endif
 
-    assert(next_uop->opcode == _START_EXECUTOR || next_uop->opcode == _COLD_EXIT);
+    assert(next_uop->opcode == _START_EXECUTOR ||
+           next_uop->opcode == _COLD_EXIT ||
+           next_uop->opcode == _GUARD_IP_AFTER_RETURN ||
+           next_uop->opcode == _GUARD_IP_AFTER_YIELD);
 tier2_dispatch:
     for (;;) {
         uopcode = next_uop->opcode;
 #ifdef Py_DEBUG
         if (frame->lltrace >= 3) {
             dump_stack(frame, stack_pointer);
-            if (next_uop->opcode == _START_EXECUTOR) {
+            if (next_uop->opcode == _START_EXECUTOR ||
+                next_uop->opcode == _GUARD_IP_AFTER_RETURN ||
+                next_uop->opcode == _GUARD_IP_AFTER_YIELD
+            ) {
                 printf("%4d uop: ", 0);
             }
             else {
@@ -1173,6 +1195,7 @@ tier2_dispatch:
             }
             _PyUOpPrint(next_uop);
             printf("\n");
+            fflush(stdout);
         }
 #endif
         next_uop++;

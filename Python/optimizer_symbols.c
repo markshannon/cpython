@@ -821,13 +821,21 @@ _Py_uop_frame_new(
     assert(ctx->curr_frame_depth < MAX_ABSTRACT_FRAME_DEPTH);
     _Py_UOpsAbstractFrame *frame = &ctx->frames[ctx->curr_frame_depth];
 
-    frame->stack_len = co->co_stacksize;
-    frame->locals_len = co->co_nlocalsplus;
-
     frame->locals = ctx->n_consumed;
-    frame->stack = frame->locals + co->co_nlocalsplus;
+    frame->stack = frame->locals;
+    if (co == NULL) {
+        frame->stack_len = 1;
+        frame->locals_len = 0;
+        ctx->n_consumed = ctx->n_consumed + 1;
+    }
+    else {
+        frame->stack_len = co->co_stacksize;
+        frame->locals_len = co->co_nlocalsplus;
+
+        frame->stack += co->co_nlocalsplus;
+        ctx->n_consumed = ctx->n_consumed + (co->co_nlocalsplus + co->co_stacksize);
+    }
     frame->stack_pointer = frame->stack + curr_stackentries;
-    ctx->n_consumed = ctx->n_consumed + (co->co_nlocalsplus + co->co_stacksize);
     if (ctx->n_consumed >= ctx->limit) {
         ctx->done = true;
         ctx->out_of_space = true;
@@ -839,7 +847,7 @@ _Py_uop_frame_new(
         frame->locals[i] = args[i];
     }
 
-    for (int i = arg_len; i < co->co_nlocalsplus; i++) {
+    for (int i = arg_len; i < frame->locals_len; i++) {
         JitOptRef local = _Py_uop_sym_new_unknown(ctx);
         frame->locals[i] = local;
     }
@@ -896,8 +904,15 @@ _Py_uop_frame_pop(JitOptContext *ctx)
     _Py_UOpsAbstractFrame *frame = ctx->frame;
     ctx->n_consumed = frame->locals;
     ctx->curr_frame_depth--;
-    assert(ctx->curr_frame_depth >= 1);
-    ctx->frame = &ctx->frames[ctx->curr_frame_depth - 1];
+    assert(ctx->curr_frame_depth >= 0);
+    if (ctx->curr_frame_depth == 0) {
+        /* Create a fake caller frame */
+        ctx->frame = _Py_uop_frame_new(ctx, NULL, 0, NULL, 0);
+        ctx->done = true;
+    }
+    else {
+        ctx->frame = &ctx->frames[ctx->curr_frame_depth - 1];
+    }
 
     return 0;
 }

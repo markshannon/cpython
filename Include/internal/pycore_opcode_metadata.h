@@ -1027,11 +1027,10 @@ enum InstructionFormat {
 #define HAS_ERROR_FLAG (256)
 #define HAS_ESCAPES_FLAG (512)
 #define HAS_EXIT_FLAG (1024)
-#define HAS_PURE_FLAG (2048)
-#define HAS_PASSTHROUGH_FLAG (4096)
-#define HAS_OPARG_AND_1_FLAG (8192)
-#define HAS_ERROR_NO_POP_FLAG (16384)
-#define HAS_NO_SAVE_IP_FLAG (32768)
+#define HAS_DYNAMIC_EXIT_FLAG (2048)
+#define HAS_PURE_FLAG (4096)
+#define HAS_ERROR_NO_POP_FLAG (8192)
+#define HAS_NO_SAVE_IP_FLAG (16384)
 #define OPCODE_HAS_ARG(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_ARG_FLAG))
 #define OPCODE_HAS_CONST(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_CONST_FLAG))
 #define OPCODE_HAS_NAME(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_NAME_FLAG))
@@ -1043,9 +1042,8 @@ enum InstructionFormat {
 #define OPCODE_HAS_ERROR(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_ERROR_FLAG))
 #define OPCODE_HAS_ESCAPES(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_ESCAPES_FLAG))
 #define OPCODE_HAS_EXIT(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_EXIT_FLAG))
+#define OPCODE_HAS_DYNAMIC_EXIT(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_DYNAMIC_EXIT_FLAG))
 #define OPCODE_HAS_PURE(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_PURE_FLAG))
-#define OPCODE_HAS_PASSTHROUGH(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_PASSTHROUGH_FLAG))
-#define OPCODE_HAS_OPARG_AND_1(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_OPARG_AND_1_FLAG))
 #define OPCODE_HAS_ERROR_NO_POP(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_ERROR_NO_POP_FLAG))
 #define OPCODE_HAS_NO_SAVE_IP(OP) (_PyOpcode_opcode_metadata[OP].flags & (HAS_NO_SAVE_IP_FLAG))
 
@@ -1176,7 +1174,7 @@ const struct opcode_metadata _PyOpcode_opcode_metadata[267] = {
     [INSTRUMENTED_INSTRUCTION] = { true, INSTR_FMT_IX, HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
     [INSTRUMENTED_JUMP_BACKWARD] = { true, INSTR_FMT_IBC, HAS_ARG_FLAG | HAS_EVAL_BREAK_FLAG | HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
     [INSTRUMENTED_JUMP_FORWARD] = { true, INSTR_FMT_IB, HAS_ARG_FLAG },
-    [INSTRUMENTED_LINE] = { true, INSTR_FMT_IX, HAS_ESCAPES_FLAG },
+    [INSTRUMENTED_LINE] = { true, INSTR_FMT_IX, HAS_ESCAPES_FLAG | HAS_NO_SAVE_IP_FLAG },
     [INSTRUMENTED_LOAD_SUPER_ATTR] = { true, INSTR_FMT_IBC, HAS_ARG_FLAG | HAS_NAME_FLAG | HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
     [INSTRUMENTED_NOT_TAKEN] = { true, INSTR_FMT_IX, 0 },
     [INSTRUMENTED_POP_ITER] = { true, INSTR_FMT_IX, HAS_ESCAPES_FLAG },
@@ -1324,7 +1322,6 @@ _PyOpcode_macro_expansion[256] = {
     [BINARY_OP_ADD_INT] = { .nuops = 3, .uops = { { _GUARD_TOS_INT, OPARG_SIMPLE, 0 }, { _GUARD_NOS_INT, OPARG_SIMPLE, 0 }, { _BINARY_OP_ADD_INT, OPARG_SIMPLE, 5 } } },
     [BINARY_OP_ADD_UNICODE] = { .nuops = 3, .uops = { { _GUARD_TOS_UNICODE, OPARG_SIMPLE, 0 }, { _GUARD_NOS_UNICODE, OPARG_SIMPLE, 0 }, { _BINARY_OP_ADD_UNICODE, OPARG_SIMPLE, 5 } } },
     [BINARY_OP_EXTEND] = { .nuops = 2, .uops = { { _GUARD_BINARY_OP_EXTEND, 4, 1 }, { _BINARY_OP_EXTEND, 4, 1 } } },
-    [BINARY_OP_INPLACE_ADD_UNICODE] = { .nuops = 3, .uops = { { _GUARD_TOS_UNICODE, OPARG_SIMPLE, 0 }, { _GUARD_NOS_UNICODE, OPARG_SIMPLE, 0 }, { _BINARY_OP_INPLACE_ADD_UNICODE, OPARG_SIMPLE, 5 } } },
     [BINARY_OP_MULTIPLY_FLOAT] = { .nuops = 3, .uops = { { _GUARD_TOS_FLOAT, OPARG_SIMPLE, 0 }, { _GUARD_NOS_FLOAT, OPARG_SIMPLE, 0 }, { _BINARY_OP_MULTIPLY_FLOAT, OPARG_SIMPLE, 5 } } },
     [BINARY_OP_MULTIPLY_INT] = { .nuops = 3, .uops = { { _GUARD_TOS_INT, OPARG_SIMPLE, 0 }, { _GUARD_NOS_INT, OPARG_SIMPLE, 0 }, { _BINARY_OP_MULTIPLY_INT, OPARG_SIMPLE, 5 } } },
     [BINARY_OP_SUBSCR_DICT] = { .nuops = 2, .uops = { { _GUARD_NOS_DICT, OPARG_SIMPLE, 0 }, { _BINARY_OP_SUBSCR_DICT, OPARG_SIMPLE, 5 } } },
@@ -1500,7 +1497,7 @@ _PyOpcode_macro_expansion[256] = {
     [UNPACK_SEQUENCE_TUPLE] = { .nuops = 2, .uops = { { _GUARD_TOS_TUPLE, OPARG_SIMPLE, 0 }, { _UNPACK_SEQUENCE_TUPLE, OPARG_SIMPLE, 1 } } },
     [UNPACK_SEQUENCE_TWO_TUPLE] = { .nuops = 2, .uops = { { _GUARD_TOS_TUPLE, OPARG_SIMPLE, 0 }, { _UNPACK_SEQUENCE_TWO_TUPLE, OPARG_SIMPLE, 1 } } },
     [WITH_EXCEPT_START] = { .nuops = 1, .uops = { { _WITH_EXCEPT_START, OPARG_SIMPLE, 0 } } },
-    [YIELD_VALUE] = { .nuops = 1, .uops = { { _YIELD_VALUE, OPARG_SIMPLE, 0 } } },
+    [YIELD_VALUE] = { .nuops = 2, .uops = { { _ADVANCE_IP, OPARG_REPLACED, 0 }, { _YIELD_VALUE, OPARG_SIMPLE, 0 } } },
 };
 #endif // NEED_OPCODE_METADATA
 

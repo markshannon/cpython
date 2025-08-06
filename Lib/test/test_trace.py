@@ -167,6 +167,7 @@ class TestLineCounts(unittest.TestCase):
         self.assertEqual(self.tracer.results().counts, expected)
 
     def test_trace_func_generator(self):
+        self.maxDiff = None
         self.tracer.runfunc(traced_func_calling_generator)
 
         firstlineno_calling = get_firstlineno(traced_func_calling_generator)

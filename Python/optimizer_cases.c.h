@@ -814,30 +814,7 @@
             break;
         }
 
-        case _BINARY_OP_INPLACE_ADD_UNICODE: {
-            JitOptRef right;
-            JitOptRef left;
-            right = stack_pointer[-1];
-            left = stack_pointer[-2];
-            JitOptRef res;
-            if (sym_is_const(ctx, left) && sym_is_const(ctx, right)) {
-                assert(PyUnicode_CheckExact(sym_get_const(ctx, left)));
-                assert(PyUnicode_CheckExact(sym_get_const(ctx, right)));
-                PyObject *temp = PyUnicode_Concat(sym_get_const(ctx, left), sym_get_const(ctx, right));
-                if (temp == NULL) {
-                    goto error;
-                }
-                res = sym_new_const(ctx, temp);
-                Py_DECREF(temp);
-            }
-            else {
-                res = sym_new_type(ctx, &PyUnicode_Type);
-            }
-            GETLOCAL(this_instr->operand0) = res;
-            stack_pointer += -2;
-            assert(WITHIN_STACK_BOUNDS());
-            break;
-        }
+        /* _BINARY_OP_INPLACE_ADD_UNICODE is not a viable micro-op for tier 2 */
 
         case _GUARD_BINARY_OP_EXTEND: {
             break;
@@ -1068,7 +1045,7 @@
             assert(co != NULL);
             int framesize = co->co_framesize;
             assert(framesize > 0);
-            assert(framesize <= curr_space);
+            assert(framesize <= curr_space || ctx->done);
             curr_space -= framesize;
             co = get_code(this_instr);
             if (co == NULL) {
@@ -1113,6 +1090,8 @@
             stack_pointer[-1] = gen_frame;
             break;
         }
+
+        /* _ADVANCE_IP is not a viable micro-op for tier 2 */
 
         case _YIELD_VALUE: {
             JitOptRef value;
@@ -2801,7 +2780,7 @@
             assert(co != NULL);
             int framesize = co->co_framesize;
             assert(framesize > 0);
-            assert(framesize <= curr_space);
+            assert(framesize <= curr_space || ctx->done);
             curr_space -= framesize;
             stack_pointer[0] = res;
             stack_pointer += 1;
@@ -3210,7 +3189,11 @@
             break;
         }
 
-        case _GUARD_IP: {
+        case _GUARD_IP_AFTER_RETURN: {
+            break;
+        }
+
+        case _GUARD_IP_AFTER_YIELD: {
             break;
         }
 

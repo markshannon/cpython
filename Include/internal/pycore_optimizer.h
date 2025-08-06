@@ -354,7 +354,15 @@ extern int _Py_uop_frame_pop(JitOptContext *ctx);
 
 PyAPI_FUNC(PyObject *) _Py_uop_symbols_test(PyObject *self, PyObject *ignored);
 
-PyAPI_FUNC(int) _PyOptimizer_Optimize(_PyInterpreterFrame *frame, _Py_CODEUNIT *start, _PyExecutorObject **exec_ptr, int chain_depth, int dynamic);
+typedef enum {
+    PyJIT_STATIC_EXIT = 0,
+    PyJIT_DYNAMIC_EXIT_RETURN = 1,
+    PyJIT_DYNAMIC_EXIT_YIELD = 2,
+    PyJIT_DYNAMIC_EXIT_CALL = 3,
+} _PyJit_ExitKind;
+
+
+PyAPI_FUNC(int) _PyOptimizer_Optimize(_PyInterpreterFrame *frame, _Py_CODEUNIT *start, _PyExecutorObject **exec_ptr, int chain_depth, _PyJit_ExitKind exit_kind);
 
 static inline _PyExecutorObject *_PyExecutor_FromExit(_PyExitData *exit)
 {

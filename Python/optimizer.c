@@ -104,7 +104,7 @@ make_executor_from_uops(_PyUOpInstruction *buffer, int length, const _PyBloomFil
 static int
 uop_optimize(_PyInterpreterFrame *frame, _Py_CODEUNIT *instr,
              _PyExecutorObject **exec_ptr, int curr_stackentries,
-             bool progress_needed, int dynamic);
+             bool progress_needed, _PyJit_ExitKind exit_kind);
 
 /* Returns 1 if optimized, 0 if not optimized, and -1 for an error.
  * If optimized, *executor_ptr contains a new reference to the executor
@@ -112,7 +112,7 @@ uop_optimize(_PyInterpreterFrame *frame, _Py_CODEUNIT *instr,
 int
 _PyOptimizer_Optimize(
     _PyInterpreterFrame *frame, _Py_CODEUNIT *start,
-    _PyExecutorObject **executor_ptr, int chain_depth, int dynamic)
+    _PyExecutorObject **executor_ptr, int chain_depth, _PyJit_ExitKind exit_kind)
 {
     _PyStackRef *stack_pointer = frame->stackpointer;
     assert(_PyInterpreterState_GET()->jit);
@@ -122,12 +122,18 @@ _PyOptimizer_Optimize(
     // this is true, since a deopt won't infinitely re-enter the executor:
     chain_depth %= MAX_CHAIN_DEPTH;
     bool progress_needed = chain_depth == 0;
+    if (frame->owner == FRAME_OWNED_BY_INTERPRETER) {
+        return 0;
+    }
+    if (progress_needed && exit_kind != PyJIT_STATIC_EXIT) {
+        return 0;
+    }
     PyCodeObject *code = _PyFrame_GetCode(frame);
     assert(PyCode_Check(code));
     if (progress_needed && !has_space_for_executor(code, start)) {
         return 0;
     }
-    int err = uop_optimize(frame, start, executor_ptr, (int)(stack_pointer - _PyFrame_Stackbase(frame)), progress_needed, dynamic);
+    int err = uop_optimize(frame, start, executor_ptr, (int)(stack_pointer - _PyFrame_Stackbase(frame)), progress_needed, exit_kind);
     if (err <= 0) {
         return err;
     }
@@ -427,6 +433,7 @@ PyTypeObject _PyUOpExecutor_Type = {
 /* TO DO -- Generate these tables */
 static const uint16_t
 _PyUOp_Replacements[MAX_UOP_ID + 1] = {
+    [_ADVANCE_IP] = _SET_IP,
     [_ITER_JUMP_RANGE] = _GUARD_NOT_EXHAUSTED_RANGE,
     [_ITER_JUMP_LIST] = _GUARD_NOT_EXHAUSTED_LIST,
     [_ITER_JUMP_TUPLE] = _GUARD_NOT_EXHAUSTED_TUPLE,
@@ -547,13 +554,17 @@ translate_bytecode_to_trace(
     _PyInterpreterFrame *frame, _Py_CODEUNIT *instr,
     _PyUOpInstruction *trace, int buffer_size,
     _PyBloomFilter *dependencies, bool progress_needed,
-    int dynamic)
+    _PyJit_ExitKind exit_kind)
 {
     bool first = true;
-    int dynamic_exit = 0;
+    _PyJit_ExitKind dynamic_exit = PyJIT_STATIC_EXIT;
     PyCodeObject *code = _PyFrame_GetCode(frame);
-    PyFunctionObject *func = _PyFrame_GetFunction(frame);
-    assert(PyFunction_Check(func));
+    PyFunctionObject *func = NULL;
+    PyObject *f = PyStackRef_AsPyObjectBorrow(frame->f_funcobj);
+    if (f != Py_None) {
+        func = (PyFunctionObject *)f;
+        assert(PyFunction_Check(func));
+    }
     PyCodeObject *initial_code = code;
     _Py_BloomFilter_Add(dependencies, initial_code);
     _Py_CODEUNIT *initial_instr = instr;
@@ -583,10 +594,19 @@ translate_bytecode_to_trace(
             PyUnicode_AsUTF8(code->co_filename),
             code->co_firstlineno,
             2 * INSTR_IP(initial_instr, code));
-    ADD_TO_TRACE(_START_EXECUTOR, 0, (uintptr_t)instr, INSTR_IP(instr, code));
-    if (dynamic) {
-        ADD_TO_TRACE(_GUARD_IP, 0, (uintptr_t)instr, 0);
+    if (exit_kind == PyJIT_STATIC_EXIT) {
+        ADD_TO_TRACE(_START_EXECUTOR, 0, (uintptr_t)instr, INSTR_IP(instr, code));
     }
+    else if (exit_kind == PyJIT_DYNAMIC_EXIT_RETURN) {
+        ADD_TO_TRACE(_GUARD_IP_AFTER_RETURN, exit_kind, (uintptr_t)instr, 0);
+        trace[trace_length-1].operand1 = (uintptr_t)instr;
+    }
+    else {
+        assert(exit_kind == PyJIT_DYNAMIC_EXIT_YIELD);
+        ADD_TO_TRACE(_GUARD_IP_AFTER_YIELD, exit_kind, (uintptr_t)instr, 0);
+        trace[trace_length-1].operand1 = (uintptr_t)instr;
+    }
+
     ADD_TO_TRACE(_MAKE_WARM, 0, 0, 0);
     uint32_t target = 0;
 
@@ -767,9 +787,10 @@ translate_bytecode_to_trace(
                                 break;
                             case OPARG_REPLACED:
                                 uop = _PyUOp_Replacements[uop];
+                                operand = (uintptr_t)(instr + 1);
                                 assert(uop != 0);
 #ifdef Py_DEBUG
-                                {
+                                if (uop != _SET_IP) {
                                     uint32_t next_inst = target + 1 + INLINE_CACHE_ENTRIES_FOR_ITER + (oparg > 255);
                                     uint32_t jump_target = next_inst + oparg;
                                     assert(_Py_GetBaseCodeUnit(code, jump_target).op.code == END_FOR);
@@ -804,7 +825,9 @@ translate_bytecode_to_trace(
                         if (uop == _RETURN_VALUE || uop == _RETURN_GENERATOR || uop == _YIELD_VALUE) {
                             if (trace_stack_depth == 0) {
                                 // Underflow
-                                dynamic_exit = 1;
+                                dynamic_exit = (uop == _YIELD_VALUE) ? PyJIT_DYNAMIC_EXIT_YIELD : PyJIT_DYNAMIC_EXIT_RETURN;
+                                ADD_TO_TRACE(uop, oparg, operand, target);
+                                goto done;
                             }
                             else {
                                 TRACE_STACK_POP();
@@ -826,9 +849,9 @@ translate_bytecode_to_trace(
                                     PyUnicode_AsUTF8(code->co_filename),
                                     code->co_firstlineno,
                                     2 * INSTR_IP(instr, code));
+                                ADD_TO_TRACE(uop, oparg, operand, target);
+                                goto top;
                             }
-                            ADD_TO_TRACE(uop, oparg, operand, target);
-                            goto top;
                         }
 
                         if (uop == _PUSH_FRAME) {
@@ -1001,10 +1024,10 @@ count_exits(_PyUOpInstruction *buffer, int length)
     return exit_count;
 }
 
-static void make_exit(_PyUOpInstruction *inst, int opcode, int target)
+static void make_exit(_PyUOpInstruction *inst, int opcode, int oparg, int target)
 {
     inst->opcode = opcode;
-    inst->oparg = 0;
+    inst->oparg = oparg;
     inst->operand0 = 0;
     inst->format = UOP_FORMAT_TARGET;
     inst->target = target;
@@ -1041,9 +1064,9 @@ prepare_for_execution(_PyUOpInstruction *buffer, int length)
         _PyUOpInstruction *inst = &buffer[i];
         int opcode = inst->opcode;
         int32_t target = (int32_t)uop_get_target(inst);
-        if (_PyUop_Flags[opcode] & (HAS_EXIT_FLAG | HAS_DEOPT_FLAG)) {
-            uint16_t exit_op = (_PyUop_Flags[opcode] & HAS_EXIT_FLAG) ?
-                _EXIT_TRACE : _DEOPT;
+        uint16_t flags = _PyUop_Flags[opcode];
+        if (flags & (HAS_EXIT_FLAG | HAS_DYNAMIC_EXIT_FLAG | HAS_DEOPT_FLAG)) {
+            uint16_t exit_op = (_PyUop_Flags[opcode] & HAS_DEOPT_FLAG) ? _DEOPT : _EXIT_TRACE;
             int32_t jump_target = target;
             if (is_for_iter_test[opcode]) {
                 /* Target the POP_TOP immediately after the END_FOR,
@@ -1053,7 +1076,11 @@ prepare_for_execution(_PyUOpInstruction *buffer, int length)
                 jump_target = next_inst + inst->oparg + 1;
             }
             if (jump_target != current_jump_target || current_exit_op != exit_op) {
-                make_exit(&buffer[next_spare], exit_op, jump_target);
+                int exit_kind = PyJIT_STATIC_EXIT;
+                if (flags & HAS_DYNAMIC_EXIT_FLAG) {
+                    exit_kind = inst->oparg;
+                }
+                make_exit(&buffer[next_spare], exit_op, exit_kind, jump_target);
                 current_exit_op = exit_op;
                 current_jump_target = jump_target;
                 current_jump = next_spare;
@@ -1069,7 +1096,7 @@ prepare_for_execution(_PyUOpInstruction *buffer, int length)
                 current_popped = popped;
                 current_error = next_spare;
                 current_error_target = target;
-                make_exit(&buffer[next_spare], _ERROR_POP_N, 0);
+                make_exit(&buffer[next_spare], _ERROR_POP_N, 0, 0);
                 buffer[next_spare].operand0 = target;
                 next_spare++;
             }
@@ -1127,7 +1154,10 @@ sanity_check(_PyExecutorObject *executor)
     }
     bool ended = false;
     uint32_t i = 0;
-    CHECK(executor->trace[0].opcode == _START_EXECUTOR || executor->trace[0].opcode == _COLD_EXIT);
+    CHECK(executor->trace[0].opcode == _START_EXECUTOR ||
+          executor->trace[0].opcode == _COLD_EXIT ||
+          executor->trace[0].opcode == _GUARD_IP_AFTER_RETURN ||
+          executor->trace[0].opcode == _GUARD_IP_AFTER_YIELD);
     for (; i < executor->code_size; i++) {
         const _PyUOpInstruction *inst = &executor->trace[i];
         uint16_t opcode = inst->opcode;
@@ -1189,7 +1219,6 @@ make_executor_from_uops(_PyUOpInstruction *buffer, int length, const _PyBloomFil
     }
     int next_exit = exit_count-1;
     _PyUOpInstruction *dest = (_PyUOpInstruction *)&executor->trace[length];
-    assert(buffer[0].opcode == _START_EXECUTOR);
     buffer[0].operand0 = (uint64_t)executor;
     for (int i = length-1; i >= 0; i--) {
         int opcode = buffer[i].opcode;
@@ -1199,13 +1228,13 @@ make_executor_from_uops(_PyUOpInstruction *buffer, int length, const _PyBloomFil
         if (opcode == _EXIT_TRACE) {
             _PyExitData *exit = &executor->exits[next_exit];
             exit->target = buffer[i].target;
+            exit->dynamic = buffer[i].oparg;
             dest->operand0 = (uint64_t)exit;
             next_exit--;
         }
     }
     assert(next_exit == -1);
     assert(dest == executor->trace);
-    assert(dest->opcode == _START_EXECUTOR);
     _Py_ExecutorInit(executor, dependencies);
 #ifdef Py_DEBUG
     char *python_lltrace = Py_GETENV("PYTHON_LLTRACE");
@@ -1265,13 +1294,13 @@ uop_optimize(
     _Py_CODEUNIT *instr,
     _PyExecutorObject **exec_ptr,
     int curr_stackentries,
-    bool progress_needed, int dynamic)
+    bool progress_needed, _PyJit_ExitKind exit_kind)
 {
     _PyBloomFilter dependencies;
     _Py_BloomFilter_Init(&dependencies);
     _PyUOpInstruction buffer[UOP_MAX_TRACE_LENGTH];
     OPT_STAT_INC(attempts);
-    int length = translate_bytecode_to_trace(frame, instr, buffer, UOP_MAX_TRACE_LENGTH, &dependencies, progress_needed, dynamic);
+    int length = translate_bytecode_to_trace(frame, instr, buffer, UOP_MAX_TRACE_LENGTH, &dependencies, progress_needed, exit_kind);
     if (length <= 0) {
         // Error or nothing translated
         return length;
