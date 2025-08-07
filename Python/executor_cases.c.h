@@ -7078,9 +7078,12 @@
             else if (exit->dynamic == PyJIT_DYNAMIC_EXIT_RETURN) {
                 target = frame->instr_ptr + frame->return_offset;
             }
-            else {
-                assert(exit->dynamic == PyJIT_DYNAMIC_EXIT_YIELD);
+            else if (exit->dynamic == PyJIT_DYNAMIC_EXIT_YIELD) {
                 target = frame->instr_ptr + 1 + INLINE_CACHE_ENTRIES_SEND;
+            }
+            else {
+                assert(exit->dynamic == PyJIT_DYNAMIC_EXIT_CALL);
+                target = frame->instr_ptr;
             }
             OPT_HIST(trace_uop_execution_counter, trace_run_length_hist);
             if (frame->lltrace >= 3) {
@@ -7448,9 +7451,12 @@
             else if (exit->dynamic == PyJIT_DYNAMIC_EXIT_RETURN) {
                 target = frame->instr_ptr + frame->return_offset;
             }
-            else {
-                assert(exit->dynamic == PyJIT_DYNAMIC_EXIT_YIELD);
+            else if (exit->dynamic == PyJIT_DYNAMIC_EXIT_YIELD) {
                 target = frame->instr_ptr + 1 + INLINE_CACHE_ENTRIES_SEND;
+            }
+            else {
+                assert(exit->dynamic == PyJIT_DYNAMIC_EXIT_CALL);
+                target = frame->instr_ptr;
             }
             _Py_BackoffCounter temperature = exit->temperature;
             #if defined(Py_DEBUG) && !defined(_Py_JIT)
@@ -7530,6 +7536,30 @@
             tstate->current_executor = (PyObject *)executor;
             assert(oparg == PyJIT_DYNAMIC_EXIT_YIELD);
             _Py_CODEUNIT *actual_ip = frame->instr_ptr + 1 + INLINE_CACHE_ENTRIES_SEND;
+            if (!current_executor->vm_data.valid) {
+                assert(tstate->jit_exit->executor == current_executor);
+                assert(tstate->current_executor == executor);
+                _PyFrame_SetStackPointer(frame, stack_pointer);
+                _PyExecutor_ClearExit(tstate->jit_exit);
+                stack_pointer = _PyFrame_GetStackPointer(frame);
+                GOTO_TIER_ONE(actual_ip);
+            }
+            if (actual_ip != (_Py_CODEUNIT *)ip) {
+                GOTO_TIER_ONE(actual_ip);
+            }
+            break;
+        }
+
+        case _GUARD_IP_AFTER_CALL: {
+            oparg = CURRENT_OPARG();
+            PyObject *executor = (PyObject *)CURRENT_OPERAND0();
+            PyObject *ip = (PyObject *)CURRENT_OPERAND1();
+            #ifndef _Py_JIT
+            current_executor = (_PyExecutorObject*)executor;
+            #endif
+            tstate->current_executor = (PyObject *)executor;
+            assert(oparg == PyJIT_DYNAMIC_EXIT_CALL);
+            _Py_CODEUNIT *actual_ip = frame->instr_ptr;
             if (!current_executor->vm_data.valid) {
                 assert(tstate->jit_exit->executor == current_executor);
                 assert(tstate->current_executor == executor);

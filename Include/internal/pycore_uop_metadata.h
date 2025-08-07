@@ -338,6 +338,7 @@ const uint16_t _PyUop_Flags[MAX_UOP_ID+1] = {
     [_COLD_EXIT] = HAS_ESCAPES_FLAG,
     [_GUARD_IP_AFTER_RETURN] = HAS_ARG_FLAG | HAS_ESCAPES_FLAG,
     [_GUARD_IP_AFTER_YIELD] = HAS_ARG_FLAG | HAS_ESCAPES_FLAG,
+    [_GUARD_IP_AFTER_CALL] = HAS_ARG_FLAG | HAS_ESCAPES_FLAG,
 };
 
 const ReplicationRange _PyUop_Replication[MAX_UOP_ID+1] = {
@@ -472,6 +473,7 @@ const char *const _PyOpcode_uop_name[MAX_UOP_ID+1] = {
     [_GUARD_DORV_NO_DICT] = "_GUARD_DORV_NO_DICT",
     [_GUARD_DORV_VALUES_INST_ATTR_FROM_DICT] = "_GUARD_DORV_VALUES_INST_ATTR_FROM_DICT",
     [_GUARD_GLOBALS_VERSION] = "_GUARD_GLOBALS_VERSION",
+    [_GUARD_IP_AFTER_CALL] = "_GUARD_IP_AFTER_CALL",
     [_GUARD_IP_AFTER_RETURN] = "_GUARD_IP_AFTER_RETURN",
     [_GUARD_IP_AFTER_YIELD] = "_GUARD_IP_AFTER_YIELD",
     [_GUARD_IS_FALSE_POP] = "_GUARD_IS_FALSE_POP",
@@ -1308,6 +1310,8 @@ int _PyUop_num_popped(int opcode, int oparg)
         case _GUARD_IP_AFTER_RETURN:
             return 0;
         case _GUARD_IP_AFTER_YIELD:
+            return 0;
+        case _GUARD_IP_AFTER_CALL:
             return 0;
         default:
             return -1;

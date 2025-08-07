@@ -1177,7 +1177,8 @@ enter_tier_two:
     assert(next_uop->opcode == _START_EXECUTOR ||
            next_uop->opcode == _COLD_EXIT ||
            next_uop->opcode == _GUARD_IP_AFTER_RETURN ||
-           next_uop->opcode == _GUARD_IP_AFTER_YIELD);
+           next_uop->opcode == _GUARD_IP_AFTER_YIELD ||
+           next_uop->opcode == _GUARD_IP_AFTER_CALL);
 tier2_dispatch:
     for (;;) {
         uopcode = next_uop->opcode;

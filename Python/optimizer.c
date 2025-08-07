@@ -601,9 +601,13 @@ translate_bytecode_to_trace(
         ADD_TO_TRACE(_GUARD_IP_AFTER_RETURN, exit_kind, (uintptr_t)instr, 0);
         trace[trace_length-1].operand1 = (uintptr_t)instr;
     }
-    else {
-        assert(exit_kind == PyJIT_DYNAMIC_EXIT_YIELD);
+    else if (exit_kind == PyJIT_DYNAMIC_EXIT_YIELD) {
         ADD_TO_TRACE(_GUARD_IP_AFTER_YIELD, exit_kind, (uintptr_t)instr, 0);
+        trace[trace_length-1].operand1 = (uintptr_t)instr;
+    }
+    else {
+        assert(exit_kind == PyJIT_DYNAMIC_EXIT_CALL);
+        ADD_TO_TRACE(_GUARD_IP_AFTER_CALL, exit_kind, (uintptr_t)instr, 0);
         trace[trace_length-1].operand1 = (uintptr_t)instr;
     }
 
@@ -862,8 +866,9 @@ translate_bytecode_to_trace(
                                 opcode == SEND_GEN)
                             {
                                 DPRINTF(2, "Bailing due to dynamic target\n");
-                                OPT_STAT_INC(unknown_callee);
-                                return 0;
+                                dynamic_exit = PyJIT_DYNAMIC_EXIT_CALL;
+                                ADD_TO_TRACE(uop, oparg, 0, target);
+                                goto done;
                             }
                             assert(_PyOpcode_Deopt[opcode] == CALL || _PyOpcode_Deopt[opcode] == CALL_KW);
                             int func_version_offset =
@@ -1157,7 +1162,8 @@ sanity_check(_PyExecutorObject *executor)
     CHECK(executor->trace[0].opcode == _START_EXECUTOR ||
           executor->trace[0].opcode == _COLD_EXIT ||
           executor->trace[0].opcode == _GUARD_IP_AFTER_RETURN ||
-          executor->trace[0].opcode == _GUARD_IP_AFTER_YIELD);
+          executor->trace[0].opcode == _GUARD_IP_AFTER_YIELD ||
+          executor->trace[0].opcode == _GUARD_IP_AFTER_CALL);
     for (; i < executor->code_size; i++) {
         const _PyUOpInstruction *inst = &executor->trace[i];
         uint16_t opcode = inst->opcode;
@@ -1504,6 +1510,7 @@ _PyExecutor_GetColdExecutor(void)
         Py_FatalError("Cannot allocate core JIT code");
     }
     ((_PyUOpInstruction *)cold->trace)->opcode = _COLD_EXIT;
+    cold->vm_data.code = NULL;
 #ifdef _Py_JIT
     cold->jit_code = NULL;
     cold->jit_side_entry = NULL;
@@ -1801,6 +1808,9 @@ _PyDumpExecutors(FILE *out)
     for (_PyExecutorObject *exec = interp->executor_list_head; exec != NULL;) {
         executor_to_gv(exec, out);
         exec = exec->vm_data.links.next;
+    }
+    if (interp->cold_executor != NULL) {
+        executor_to_gv(interp->cold_executor, out);
     }
     fprintf(out, "}\n\n");
     return 0;

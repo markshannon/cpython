@@ -3197,3 +3197,7 @@
             break;
         }
 
+        case _GUARD_IP_AFTER_CALL: {
+            break;
+        }
+
