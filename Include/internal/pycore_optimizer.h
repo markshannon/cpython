@@ -180,6 +180,7 @@ typedef enum _JitSymType {
     JIT_SYM_TUPLE_TAG = 8,
     JIT_SYM_TRUTHINESS_TAG = 9,
     JIT_SYM_COMPACT_INT = 10,
+    JIT_SYM_FUNCTION_TAG = 11,
 } JitSymType;
 
 typedef struct _jit_opt_known_class {
@@ -216,6 +217,14 @@ typedef struct {
     uint8_t tag;
 } JitOptCompactInt;
 
+typedef struct {
+    uint8_t tag;
+    bool value_is_code;
+    uint32_t version;
+    PyObject *function;
+} JitOptFunction;
+
+
 typedef union _jit_opt_symbol {
     uint8_t tag;
     JitOptKnownClass cls;
@@ -224,6 +233,7 @@ typedef union _jit_opt_symbol {
     JitOptTuple tuple;
     JitOptTruthiness truthiness;
     JitOptCompactInt compact;
+    JitOptFunction function;
 } JitOptSymbol;
 
 
@@ -275,6 +285,9 @@ struct _Py_UOpsAbstractFrame {
     // Max stacklen
     int stack_len;
     int locals_len;
+    bool function_checked;
+    bool builtins_watched;
+    bool globals_watched;
 
     JitOptRef *stack_pointer;
     JitOptRef *stack;
@@ -297,6 +310,7 @@ typedef struct _JitOptContext {
     _Py_UOpsAbstractFrame *frame;
     _Py_UOpsAbstractFrame frames[MAX_ABSTRACT_FRAME_DEPTH];
     int curr_frame_depth;
+    uint32_t prechecked_function_version;
 
     // Arena for the symbolic types.
     ty_arena t_arena;
@@ -338,6 +352,8 @@ extern JitOptRef _Py_uop_sym_new_truthiness(JitOptContext *ctx, JitOptRef value,
 extern bool _Py_uop_sym_is_compact_int(JitOptRef sym);
 extern JitOptRef _Py_uop_sym_new_compact_int(JitOptContext *ctx);
 extern void _Py_uop_sym_set_compact_int(JitOptContext *ctx,  JitOptRef sym);
+extern void _Py_uop_sym_set_function_version(JitOptContext *ctx, JitOptRef ref, uint32_t version);
+extern uint32_t _Py_uop_sym_get_function_version(JitOptRef ref);
 
 extern void _Py_uop_abstractcontext_init(JitOptContext *ctx);
 extern void _Py_uop_abstractcontext_fini(JitOptContext *ctx);

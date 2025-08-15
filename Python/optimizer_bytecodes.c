@@ -28,6 +28,8 @@ typedef struct _Py_UOpsAbstractFrame _Py_UOpsAbstractFrame;
 #define sym_set_type_version(SYM, VERSION) _Py_uop_sym_set_type_version(ctx, SYM, VERSION)
 #define sym_set_const(SYM, CNST) _Py_uop_sym_set_const(ctx, SYM, CNST)
 #define sym_set_compact_int(SYM) _Py_uop_sym_set_compact_int(ctx, SYM)
+#define sym_get_function_version(SYM) _Py_uop_sym_get_function_version(SYM)
+#define sym_set_function_version(SYM, VER) _Py_uop_sym_set_function_version(ctx, SYM, VER)
 #define sym_is_bottom _Py_uop_sym_is_bottom
 #define frame_new _Py_uop_frame_new
 #define frame_pop _Py_uop_frame_pop
@@ -663,12 +665,18 @@ dummy_func(void) {
     }
 
     op(_CHECK_FUNCTION_VERSION, (func_version/2, callable, self_or_null, unused[oparg] -- callable, self_or_null, unused[oparg])) {
-        if (sym_is_const(ctx, callable) && sym_matches_type(callable, &PyFunction_Type)) {
-            assert(PyFunction_Check(sym_get_const(ctx, callable)));
-            REPLACE_OP(this_instr, _CHECK_FUNCTION_VERSION_INLINE, 0, func_version);
-            this_instr->operand1 = (uintptr_t)sym_get_const(ctx, callable);
+        assert(func_version != 0);
+        if (sym_get_function_version(callable) == func_version) {
+            REPLACE_OP(this_instr, NOP, 0, 0);
         }
-        sym_set_type(callable, &PyFunction_Type);
+        else {
+            if (sym_is_const(ctx, callable) && sym_matches_type(callable, &PyFunction_Type)) {
+                assert(PyFunction_Check(sym_get_const(ctx, callable)));
+                REPLACE_OP(this_instr, _CHECK_FUNCTION_VERSION_INLINE, 0, func_version);
+                this_instr->operand1 = (uintptr_t)sym_get_const(ctx, callable);
+            }
+            sym_set_function_version(callable, func_version);
+        }
     }
 
     op(_CHECK_METHOD_VERSION, (func_version/2, callable, null, unused[oparg] -- callable, null, unused[oparg])) {

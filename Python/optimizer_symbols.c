@@ -121,6 +121,12 @@ static void make_const(JitOptSymbol *sym, PyObject *val)
 static inline void
 sym_set_bottom(JitOptContext *ctx, JitOptSymbol *sym)
 {
+    if (sym->tag == JIT_SYM_KNOWN_VALUE_TAG) {
+        Py_CLEAR(sym->value.value);
+    }
+    else if (sym->tag == JIT_SYM_FUNCTION_TAG) {
+        Py_CLEAR(sym->function.function);
+    }
     sym->tag = JIT_SYM_BOTTOM_TAG;
     ctx->done = true;
     ctx->contradiction = true;
@@ -143,19 +149,24 @@ bool
 _Py_uop_sym_is_const(JitOptContext *ctx, JitOptRef ref)
 {
     JitOptSymbol *sym = PyJitRef_Unwrap(ref);
-    if (sym->tag == JIT_SYM_KNOWN_VALUE_TAG) {
-        return true;
-    }
-    if (sym->tag == JIT_SYM_TRUTHINESS_TAG) {
-        JitOptSymbol *value = allocation_base(ctx) + sym->truthiness.value;
-        int truthiness = _Py_uop_sym_truthiness(ctx, PyJitRef_Wrap(value));
-        if (truthiness < 0) {
-            return false;
+    switch(sym->tag) {
+        case JIT_SYM_KNOWN_VALUE_TAG:
+            return true;
+        case JIT_SYM_TRUTHINESS_TAG:
+        {
+            JitOptSymbol *value = allocation_base(ctx) + sym->truthiness.value;
+            int truthiness = _Py_uop_sym_truthiness(ctx, PyJitRef_Wrap(value));
+            if (truthiness < 0) {
+                return false;
+            }
+            make_const(sym, (truthiness ^ sym->truthiness.invert) ? Py_True : Py_False);
+            return true;
         }
-        make_const(sym, (truthiness ^ sym->truthiness.invert) ? Py_True : Py_False);
-        return true;
+        case JIT_SYM_FUNCTION_TAG:
+            return sym->function.function != NULL;
+        default:
+            return false;
     }
-    return false;
 }
 
 bool
@@ -181,6 +192,9 @@ _Py_uop_sym_get_const(JitOptContext *ctx, JitOptRef ref)
         PyObject *res = (truthiness ^ sym->truthiness.invert) ? Py_True : Py_False;
         make_const(sym, res);
         return res;
+    }
+    if (sym->tag == JIT_SYM_FUNCTION_TAG) {
+        return sym->function.function;
     }
     return NULL;
 }
@@ -269,6 +283,11 @@ _Py_uop_sym_set_type(JitOptContext *ctx, JitOptRef ref, PyTypeObject *typ)
                 sym_set_bottom(ctx, sym);
             }
             return;
+        case JIT_SYM_FUNCTION_TAG:
+            if (typ != &PyFunction_Type) {
+                sym_set_bottom(ctx, sym);
+            }
+            return;
     }
 }
 
@@ -303,6 +322,12 @@ _Py_uop_sym_set_type_version(JitOptContext *ctx, JitOptRef ref, unsigned int ver
             return true;
         case JIT_SYM_TUPLE_TAG:
             if (PyTuple_Type.tp_version_tag != version) {
+                sym_set_bottom(ctx, sym);
+                return false;
+            };
+            return true;
+        case JIT_SYM_FUNCTION_TAG:
+            if (PyFunction_Type.tp_version_tag != version) {
                 sym_set_bottom(ctx, sym);
                 return false;
             };
@@ -424,6 +449,14 @@ _Py_uop_sym_set_const(JitOptContext *ctx, JitOptRef ref, PyObject *const_val)
                 sym_set_bottom(ctx, sym);
             }
             return;
+        case JIT_SYM_FUNCTION_TAG:
+            if (PyFunction_Check(const_val)) {
+                sym->function.function = Py_NewRef(const_val);
+                if (((PyFunctionObject *)const_val)->func_version != sym->function.version) {
+                    sym_set_bottom(ctx, sym);
+                }
+            }
+            return;
     }
 }
 
@@ -543,7 +576,8 @@ _Py_uop_sym_get_type(JitOptRef ref)
             return &PyBool_Type;
         case JIT_SYM_COMPACT_INT:
             return &PyLong_Type;
-
+        case JIT_SYM_FUNCTION_TAG:
+            return &PyFunction_Type;
     }
     Py_UNREACHABLE();
 }
@@ -571,6 +605,8 @@ _Py_uop_sym_get_type_version(JitOptRef ref)
             return PyBool_Type.tp_version_tag;
         case JIT_SYM_COMPACT_INT:
             return PyLong_Type.tp_version_tag;
+        case JIT_SYM_FUNCTION_TAG:
+            return PyFunction_Type.tp_version_tag;
     }
     Py_UNREACHABLE();
 }
@@ -606,6 +642,8 @@ _Py_uop_sym_truthiness(JitOptContext *ctx, JitOptRef ref)
         case JIT_SYM_UNKNOWN_TAG:
         case JIT_SYM_COMPACT_INT:
             return -1;
+        case JIT_SYM_FUNCTION_TAG:
+            return 1;
         case JIT_SYM_KNOWN_CLASS_TAG:
             /* TODO :
              * Instances of some classes are always
@@ -761,6 +799,7 @@ _Py_uop_sym_set_compact_int(JitOptContext *ctx, JitOptRef ref)
             return;
         case JIT_SYM_TUPLE_TAG:
         case JIT_SYM_TRUTHINESS_TAG:
+        case JIT_SYM_FUNCTION_TAG:
             sym_set_bottom(ctx, sym);
             return;
         case JIT_SYM_BOTTOM_TAG:
@@ -771,6 +810,72 @@ _Py_uop_sym_set_compact_int(JitOptContext *ctx, JitOptRef ref)
             sym->tag = JIT_SYM_COMPACT_INT;
             return;
     }
+}
+
+void
+_Py_uop_sym_set_function_version(JitOptContext *ctx, JitOptRef ref, uint32_t version)
+{
+    JitOptSymbol *sym = PyJitRef_Unwrap(ref);
+    JitSymType tag = sym->tag;
+    switch(tag) {
+        case JIT_SYM_TUPLE_TAG:
+        case JIT_SYM_TRUTHINESS_TAG:
+        case JIT_SYM_BOTTOM_TAG:
+        case JIT_SYM_COMPACT_INT:
+        case JIT_SYM_NULL_TAG:
+            sym_set_bottom(ctx, sym);
+            return;
+        case JIT_SYM_KNOWN_CLASS_TAG:
+            if (sym->cls.type == &PyFunction_Type) {
+                sym->tag = JIT_SYM_FUNCTION_TAG;
+                sym->function.function = NULL;
+                sym->function.version = version;
+            } else {
+                sym_set_bottom(ctx, sym);
+            }
+            return;
+        case JIT_SYM_TYPE_VERSION_TAG:
+            if (sym->version.version == PyLong_Type.tp_version_tag) {
+                sym->tag = JIT_SYM_COMPACT_INT;
+            }
+            else {
+                sym_set_bottom(ctx, sym);
+            }
+            return;
+        case JIT_SYM_KNOWN_VALUE_TAG:
+            if (PyFunction_Check(sym->value.value)) {
+                sym->tag = JIT_SYM_FUNCTION_TAG;
+                sym->function.function = sym->value.value;
+                sym->function.version = version;
+            }
+            else {
+                Py_CLEAR(sym->value.value);
+                sym_set_bottom(ctx, sym);
+            }
+            return;
+        case JIT_SYM_NON_NULL_TAG:
+        case JIT_SYM_UNKNOWN_TAG:
+            sym->tag = JIT_SYM_FUNCTION_TAG;
+            sym->function.function = NULL;
+            sym->function.version = version;
+            return;
+        case JIT_SYM_FUNCTION_TAG:
+            if (sym->function.version != version) {
+                Py_CLEAR(sym->function.function);
+                sym_set_bottom(ctx, sym);
+            }
+            return;
+    }
+}
+
+uint32_t
+_Py_uop_sym_get_function_version(JitOptRef ref)
+{
+    JitOptSymbol *sym = PyJitRef_Unwrap(ref);
+    if (sym->tag == JIT_SYM_FUNCTION_TAG) {
+        return sym->function.version;
+    }
+    return 0;
 }
 
 JitOptRef
@@ -827,6 +932,9 @@ _Py_uop_frame_new(
     frame->locals = ctx->n_consumed;
     frame->stack = frame->locals + co->co_nlocalsplus;
     frame->stack_pointer = frame->stack + curr_stackentries;
+    frame->function_checked = false;
+    frame->builtins_watched = false;
+    frame->globals_watched = false;
     ctx->n_consumed = ctx->n_consumed + (co->co_nlocalsplus + co->co_stacksize);
     if (ctx->n_consumed >= ctx->limit) {
         ctx->done = true;
@@ -860,12 +968,16 @@ _Py_uop_abstractcontext_fini(JitOptContext *ctx)
     if (ctx == NULL) {
         return;
     }
+    ctx->prechecked_function_version = 0;
     ctx->curr_frame_depth = 0;
     int tys = ctx->t_arena.ty_curr_number;
     for (int i = 0; i < tys; i++) {
         JitOptSymbol *sym = &ctx->t_arena.arena[i];
         if (sym->tag == JIT_SYM_KNOWN_VALUE_TAG) {
             Py_CLEAR(sym->value.value);
+        }
+        if (sym->tag == JIT_SYM_FUNCTION_TAG) {
+            Py_CLEAR(sym->function.function);
         }
     }
 }
