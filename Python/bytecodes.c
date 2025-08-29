@@ -5193,12 +5193,14 @@ dummy_func(
         ///////// Tier-2 only opcodes /////////
 
         op (_GUARD_IS_TRUE_POP, (flag -- )) {
+            assert(PyStackRef_BoolCheck(flag));
             int is_true = PyStackRef_IsTrue(flag);
             DEAD(flag);
             AT_END_EXIT_IF(!is_true);
         }
 
         op (_GUARD_IS_FALSE_POP, (flag -- )) {
+            assert(PyStackRef_BoolCheck(flag));
             int is_false = PyStackRef_IsFalse(flag);
             DEAD(flag);
             AT_END_EXIT_IF(!is_false);

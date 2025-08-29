@@ -7009,6 +7009,7 @@
         case _GUARD_IS_TRUE_POP: {
             _PyStackRef flag;
             flag = stack_pointer[-1];
+            assert(PyStackRef_BoolCheck(flag));
             int is_true = PyStackRef_IsTrue(flag);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
@@ -7022,6 +7023,7 @@
         case _GUARD_IS_FALSE_POP: {
             _PyStackRef flag;
             flag = stack_pointer[-1];
+            assert(PyStackRef_BoolCheck(flag));
             int is_false = PyStackRef_IsFalse(flag);
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
