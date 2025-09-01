@@ -3182,7 +3182,9 @@ _Py_Dealloc(PyObject *op)
 #if !defined(Py_GIL_DISABLED) && !defined(Py_STACKREF_DEBUG)
     /* This assertion doesn't hold for the free-threading build, as
      * PyStackRef_CLOSE_SPECIALIZED is not implemented */
-    assert(tstate->current_frame == NULL || tstate->current_frame->stackpointer != NULL);
+    assert(tstate->current_frame == NULL ||
+           tstate->current_frame != FRAME_OWNED_BY_THREAD ||
+           ((_PyInterpreterFrame *)tstate->current_frame)->stackpointer != NULL);
 #endif
     PyObject *old_exc = tstate != NULL ? tstate->current_exception : NULL;
     // Keep the old exception type alive to prevent undefined behavior

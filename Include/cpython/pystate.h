@@ -129,7 +129,7 @@ struct _ts {
     int what_event; /* The event currently being monitored, if any. */
 
     /* Pointer to currently executing frame. */
-    struct _PyInterpreterFrame *current_frame;
+    struct _PyFrameCommon *current_frame;
 
     Py_tracefunc c_profilefunc;
     Py_tracefunc c_tracefunc;

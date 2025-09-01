@@ -166,10 +166,11 @@ do { \
     do {                                                \
         assert(tstate->interp->eval_frame == NULL);     \
         _PyFrame_SetStackPointer(frame, stack_pointer); \
-        assert((NEW_FRAME)->previous == frame);         \
-        frame = tstate->current_frame = (NEW_FRAME);     \
-        CALL_STAT_INC(inlined_py_calls);                \
-        JUMP_TO_LABEL(start_frame);                      \
+        assert((NEW_FRAME)->previous == (_PyFrameCommon *)frame);       \
+        frame = (NEW_FRAME);                              \
+        tstate->current_frame = (_PyFrameCommon *)frame;  \
+        CALL_STAT_INC(inlined_py_calls);                  \
+        JUMP_TO_LABEL(start_frame);                       \
     } while (0)
 
 /* Tuple access macros */
@@ -355,7 +356,7 @@ _PyFrame_SetStackPointer(frame, stack_pointer)
 do {                                                   \
     OPT_STAT_INC(traces_executed);                     \
     next_instr = _Py_jit_entry((EXECUTOR), frame, stack_pointer, tstate); \
-    frame = tstate->current_frame;                     \
+    frame = (_PyInterpreterFrame *)tstate->current_frame; \
     stack_pointer = _PyFrame_GetStackPointer(frame);   \
     if (next_instr == NULL) {                          \
         next_instr = frame->instr_ptr;                 \

@@ -122,7 +122,8 @@ import_all_from(PyThreadState *tstate, PyObject *locals, PyObject *v)
 static PyObject *
 import_star(PyThreadState* tstate, PyObject *from)
 {
-    _PyInterpreterFrame *frame = tstate->current_frame;
+    _PyInterpreterFrame *frame = (_PyInterpreterFrame *)tstate->current_frame;
+    assert(frame->owner == FRAME_OWNED_BY_THREAD || frame->owner == FRAME_OWNED_BY_GENERATOR);
 
     PyObject *locals = _PyFrame_GetLocals(frame);
     if (locals == NULL) {
@@ -141,7 +142,7 @@ import_star(PyThreadState* tstate, PyObject *from)
 static PyObject *
 stopiteration_error(PyThreadState* tstate, PyObject *exc)
 {
-    _PyInterpreterFrame *frame = tstate->current_frame;
+    _PyInterpreterFrame *frame = (_PyInterpreterFrame *)tstate->current_frame;
     assert(frame->owner == FRAME_OWNED_BY_GENERATOR);
     assert(PyExceptionInstance_Check(exc));
     const char *msg = NULL;

@@ -2557,8 +2557,7 @@ _PyThread_CurrentFrames(void)
     PyInterpreterState *i;
     for (i = runtime->interpreters.head; i != NULL; i = i->next) {
         _Py_FOR_EACH_TSTATE_UNLOCKED(i, t) {
-            _PyInterpreterFrame *frame = t->current_frame;
-            frame = _PyFrame_GetFirstComplete(frame);
+            _PyInterpreterFrame *frame = _PyFrame_GetFirstComplete(t->current_frame);
             if (frame == NULL) {
                 continue;
             }

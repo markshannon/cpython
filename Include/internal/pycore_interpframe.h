@@ -88,7 +88,7 @@ static inline void _PyFrame_Copy(_PyInterpreterFrame *src, _PyInterpreterFrame *
     dest->frame_obj = src->frame_obj;
     dest->instr_ptr = src->instr_ptr;
 #ifdef Py_GIL_DISABLED
-    dest->tlbc_index = src->tlbc_index;
+    dest->base.tlbc_index = src->base.tlbc_index;
 #endif
     assert(src->stackpointer != NULL);
     int stacktop = (int)(src->stackpointer - src->localsplus);
@@ -128,7 +128,7 @@ _PyFrame_Initialize(
     PyThreadState *tstate, _PyInterpreterFrame *frame, _PyStackRef func,
     PyObject *locals, PyCodeObject *code, int null_locals_from, _PyInterpreterFrame *previous)
 {
-    frame->previous = previous;
+    frame->previous = (_PyFrameCommon *)previous;
     frame->f_funcobj = func;
     frame->f_executable = PyStackRef_FromPyObjectNew(code);
     PyFunctionObject *func_obj = (PyFunctionObject *)PyStackRef_AsPyObjectBorrow(func);
@@ -197,23 +197,24 @@ _PyFrame_SetStackPointer(_PyInterpreterFrame *frame, _PyStackRef *stack_pointer)
  * from other threads for sys._current_frames() and similar APIs.
  */
 static inline bool _Py_NO_SANITIZE_THREAD
-_PyFrame_IsIncomplete(_PyInterpreterFrame *frame)
+_PyFrame_IsIncomplete(_PyFrameCommon *frame)
 {
     if (frame->owner >= FRAME_OWNED_BY_INTERPRETER) {
         return true;
     }
+    _PyInterpreterFrame *iframe = (_PyInterpreterFrame *)frame;
     return frame->owner != FRAME_OWNED_BY_GENERATOR &&
-           frame->instr_ptr < _PyFrame_GetBytecode(frame) +
-                                  _PyFrame_GetCode(frame)->_co_firsttraceable;
+           iframe->instr_ptr < _PyFrame_GetBytecode(iframe) +
+                                  _PyFrame_GetCode(iframe)->_co_firsttraceable;
 }
 
 static inline _PyInterpreterFrame *
-_PyFrame_GetFirstComplete(_PyInterpreterFrame *frame)
+_PyFrame_GetFirstComplete(_PyFrameCommon *frame)
 {
     while (frame && _PyFrame_IsIncomplete(frame)) {
         frame = frame->previous;
     }
-    return frame;
+    return (_PyInterpreterFrame *)frame;
 }
 
 static inline _PyInterpreterFrame *
@@ -233,8 +234,7 @@ _PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame *frame);
 static inline PyFrameObject *
 _PyFrame_GetFrameObject(_PyInterpreterFrame *frame)
 {
-
-    assert(!_PyFrame_IsIncomplete(frame));
+    assert(!_PyFrame_IsIncomplete((_PyFrameCommon *)frame));
     PyFrameObject *res =  frame->frame_obj;
     if (res != NULL) {
         return res;
@@ -309,7 +309,7 @@ _PyFrame_PushTrampolineUnchecked(PyThreadState *tstate, PyCodeObject *code, int 
     _PyInterpreterFrame *frame = (_PyInterpreterFrame *)tstate->datastack_top;
     tstate->datastack_top += code->co_framesize;
     assert(tstate->datastack_top < tstate->datastack_limit);
-    frame->previous = previous;
+    frame->previous = (_PyFrameCommon *)previous;
     frame->f_funcobj = PyStackRef_None;
     frame->f_executable = PyStackRef_FromPyObjectNew(code);
 #ifdef Py_DEBUG

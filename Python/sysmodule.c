@@ -2102,7 +2102,7 @@ sys__getframe_impl(PyObject *module, int depth)
 /*[clinic end generated code: output=d438776c04d59804 input=c1be8a6464b11ee5]*/
 {
     PyThreadState *tstate = _PyThreadState_GET();
-    _PyInterpreterFrame *frame = tstate->current_frame;
+    _PyInterpreterFrame *frame = _PyFrame_GetFirstComplete(tstate->current_frame);
 
     if (frame != NULL) {
         while (depth > 0) {
@@ -2603,9 +2603,9 @@ sys__getframemodulename_impl(PyObject *module, int depth)
     if (PySys_Audit("sys._getframemodulename", "i", depth) < 0) {
         return NULL;
     }
-    _PyInterpreterFrame *f = _PyThreadState_GET()->current_frame;
-    while (f && (_PyFrame_IsIncomplete(f) || depth-- > 0)) {
-        f = f->previous;
+    _PyInterpreterFrame *f = _PyFrame_GetFirstComplete(_PyThreadState_GET()->current_frame);
+    while (f && depth-- > 0) {
+        f = _PyFrame_GetFirstComplete(f->previous);
     }
     if (f == NULL || PyStackRef_IsNull(f->f_funcobj)) {
         Py_RETURN_NONE;

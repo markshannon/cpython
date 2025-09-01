@@ -978,7 +978,7 @@ done:
    This function is signal safe. */
 
 static void
-dump_frame(int fd, _PyInterpreterFrame *frame)
+dump_interpeter_frame(int fd, _PyInterpreterFrame *frame)
 {
     assert(frame->owner < FRAME_OWNED_BY_INTERPRETER);
 
@@ -1015,6 +1015,17 @@ dump_frame(int fd, _PyInterpreterFrame *frame)
     PUTS(fd, "\n");
 }
 
+static void
+dump_frame(int fd, _PyFrameCommon *frame)
+{
+    if (frame->owner == FRAME_OWNED_BY_CSTACK) {
+        // TO DO - Builtin function
+    }
+    else {
+        dump_interpeter_frame(fd, (_PyInterpreterFrame *)frame);
+    }
+}
+
 static int
 tstate_is_freed(PyThreadState *tstate)
 {
@@ -1047,7 +1058,7 @@ dump_traceback(int fd, PyThreadState *tstate, int write_header)
         return;
     }
 
-    _PyInterpreterFrame *frame = tstate->current_frame;
+    _PyFrameCommon *frame = tstate->current_frame;
     if (frame == NULL) {
         PUTS(fd, "  <no Python frame>\n");
         return;

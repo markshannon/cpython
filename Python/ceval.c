@@ -1009,7 +1009,7 @@ _PyObjectArray_Free(PyObject **array, PyObject **scratch)
 
 typedef struct {
     _PyInterpreterFrame frame;
-    _PyStackRef stack[1];
+    _PyStackRef executor;
 } _PyEntryFrame;
 
 PyObject* _Py_HOT_FUNCTION DONT_SLP_VECTORIZE
@@ -1030,7 +1030,9 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
 #if !Py_TAIL_CALL_INTERP
     uint8_t opcode;    /* Current opcode */
     int oparg;         /* Current opcode argument, if any */
-    assert(tstate->current_frame == NULL || tstate->current_frame->stackpointer != NULL);
+    assert(tstate->current_frame == NULL ||
+           tstate->current_frame->owner > FRAME_OWNED_BY_GENERATOR ||
+           ((_PyInterpreterFrame *)tstate->current_frame)->stackpointer != NULL);
 #endif
     _PyEntryFrame entry;
 
@@ -1044,7 +1046,6 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
      * These are cached values from the frame and code object.  */
     _Py_CODEUNIT *next_instr;
     _PyStackRef *stack_pointer;
-    entry.stack[0] = PyStackRef_NULL;
 #ifdef Py_STACKREF_DEBUG
     entry.frame.f_funcobj = PyStackRef_None;
 #elif defined(Py_DEBUG)
@@ -1057,7 +1058,7 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
 #endif
     entry.frame.f_executable = PyStackRef_None;
     entry.frame.instr_ptr = (_Py_CODEUNIT *)_Py_INTERPRETER_TRAMPOLINE_INSTRUCTIONS + 1;
-    entry.frame.stackpointer = entry.stack;
+    entry.frame.stackpointer = entry.frame.localsplus;
     entry.frame.owner = FRAME_OWNED_BY_INTERPRETER;
     entry.frame.visited = 0;
     entry.frame.return_offset = 0;
@@ -1066,12 +1067,12 @@ _PyEval_EvalFrameDefault(PyThreadState *tstate, _PyInterpreterFrame *frame, int 
 #endif
     /* Push frame */
     entry.frame.previous = tstate->current_frame;
-    frame->previous = &entry.frame;
-    tstate->current_frame = frame;
-    entry.frame.localsplus[0] = PyStackRef_NULL;
+    frame->previous = (_PyFrameCommon *)&entry;
+    tstate->current_frame = (_PyFrameCommon *)frame;
 #ifdef _Py_TIER2
+    entry.executor = PyStackRef_NULL;
     if (tstate->current_executor != NULL) {
-        entry.frame.localsplus[0] = PyStackRef_FromPyObjectNew(tstate->current_executor);
+        entry.executor = PyStackRef_FromPyObjectNew(tstate->current_executor);
         tstate->current_executor = NULL;
     }
 #endif
@@ -1128,7 +1129,9 @@ early_exit:
     assert(frame->owner != FRAME_OWNED_BY_INTERPRETER);
     // GH-99729: We need to unlink the frame *before* clearing it:
     _PyInterpreterFrame *dying = frame;
-    frame = tstate->current_frame = dying->previous;
+
+    frame = (_PyInterpreterFrame *)dying->previous;
+    tstate->current_frame = (_PyFrameCommon *)frame;
     _PyEval_FrameClearAndPop(tstate, dying);
     frame->return_offset = 0;
     assert(frame->owner == FRAME_OWNED_BY_INTERPRETER);
@@ -2888,7 +2891,7 @@ int
 PyEval_MergeCompilerFlags(PyCompilerFlags *cf)
 {
     PyThreadState *tstate = _PyThreadState_GET();
-    _PyInterpreterFrame *current_frame = tstate->current_frame;
+    _PyInterpreterFrame *current_frame = _PyThreadState_GetFrame(tstate);
     int result = cf->cf_flags != 0;
 
     if (current_frame != NULL) {

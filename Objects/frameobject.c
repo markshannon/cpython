@@ -975,7 +975,7 @@ static PyObject *
 frame_locals_get_impl(PyFrameObject *self)
 /*[clinic end generated code: output=b4ace8bb4cae71f4 input=7bd444d0dc8ddf44]*/
 {
-    assert(!_PyFrame_IsIncomplete(self->f_frame));
+    assert(!_PyFrame_IsIncomplete((_PyFrameCommon *)self->f_frame));
 
     PyCodeObject *co = _PyFrame_GetCode(self->f_frame);
 
@@ -1622,7 +1622,7 @@ first_line_not_before(int *lines, int len, int line)
 
 static bool frame_is_suspended(PyFrameObject *frame)
 {
-    assert(!_PyFrame_IsIncomplete(frame->f_frame));
+    assert(!_PyFrame_IsIncomplete((_PyFrameCommon *)frame->f_frame));
     if (frame->f_frame->owner == FRAME_OWNED_BY_GENERATOR) {
         PyGenObject *gen = _PyGen_GetGeneratorFromFrame(frame->f_frame);
         return FRAME_STATE_SUSPENDED(gen->gi_frame_state);
@@ -2138,6 +2138,12 @@ _PyFrame_New_NoTrack(PyCodeObject *code)
     return f;
 }
 
+static inline bool
+is_complete(_PyInterpreterFrame *frame) {
+    return !_PyFrame_IsIncomplete((_PyFrameCommon *)frame);
+}
+
+
 /* Legacy API */
 PyFrameObject*
 PyFrame_New(PyThreadState *tstate, PyCodeObject *code,
@@ -2172,7 +2178,7 @@ PyFrame_New(PyThreadState *tstate, PyCodeObject *code,
     f->f_frame->owner = FRAME_OWNED_BY_FRAME_OBJECT;
     // This frame needs to be "complete", so pretend that the first RESUME ran:
     f->f_frame->instr_ptr = _PyCode_CODE(code) + code->_co_firsttraceable + 1;
-    assert(!_PyFrame_IsIncomplete(f->f_frame));
+    assert(is_complete(f->f_frame));
     Py_DECREF(func);
     _PyObject_GC_TRACK(f);
     return f;
@@ -2236,7 +2242,7 @@ frame_get_var(_PyInterpreterFrame *frame, PyCodeObject *co, int i,
         else if (kind & CO_FAST_CELL) {
             if (value != NULL) {
                 if (PyCell_Check(value)) {
-                    assert(!_PyFrame_IsIncomplete(frame));
+                    assert(!_PyFrame_IsIncomplete((_PyFrameCommon *)frame));
                     value = PyCell_GetRef((PyCellObject *)value);
                 }
                 else {
@@ -2381,7 +2387,7 @@ _PyFrame_IsEntryFrame(PyFrameObject *frame)
 {
     assert(frame != NULL);
     _PyInterpreterFrame *f = frame->f_frame;
-    assert(!_PyFrame_IsIncomplete(f));
+    assert(is_complete(f));
     return f->previous && f->previous->owner == FRAME_OWNED_BY_INTERPRETER;
 }
 
@@ -2391,7 +2397,7 @@ PyFrame_GetCode(PyFrameObject *frame)
     assert(frame != NULL);
     PyObject *code;
     Py_BEGIN_CRITICAL_SECTION(frame);
-    assert(!_PyFrame_IsIncomplete(frame->f_frame));
+    assert(is_complete(frame->f_frame));
     code = Py_NewRef(_PyFrame_GetCode(frame->f_frame));
     Py_END_CRITICAL_SECTION();
     return (PyCodeObject *)code;
@@ -2402,13 +2408,13 @@ PyFrameObject*
 PyFrame_GetBack(PyFrameObject *frame)
 {
     assert(frame != NULL);
-    assert(!_PyFrame_IsIncomplete(frame->f_frame));
+    assert(is_complete(frame->f_frame));
     PyFrameObject *back = frame->f_back;
     if (back == NULL) {
-        _PyInterpreterFrame *prev = frame->f_frame->previous;
-        prev = _PyFrame_GetFirstComplete(prev);
-        if (prev) {
-            back = _PyFrame_GetFrameObject(prev);
+        _PyFrameCommon *prev = frame->f_frame->previous;
+        _PyInterpreterFrame *iprev = _PyFrame_GetFirstComplete(prev);
+        if (iprev) {
+            back = _PyFrame_GetFrameObject(iprev);
         }
     }
     return (PyFrameObject*)Py_XNewRef(back);
@@ -2417,21 +2423,21 @@ PyFrame_GetBack(PyFrameObject *frame)
 PyObject*
 PyFrame_GetLocals(PyFrameObject *frame)
 {
-    assert(!_PyFrame_IsIncomplete(frame->f_frame));
+    assert(is_complete(frame->f_frame));
     return frame_locals_get((PyObject *)frame, NULL);
 }
 
 PyObject*
 PyFrame_GetGlobals(PyFrameObject *frame)
 {
-    assert(!_PyFrame_IsIncomplete(frame->f_frame));
+    assert(is_complete(frame->f_frame));
     return frame_globals_get((PyObject *)frame, NULL);
 }
 
 PyObject*
 PyFrame_GetBuiltins(PyFrameObject *frame)
 {
-    assert(!_PyFrame_IsIncomplete(frame->f_frame));
+    assert(is_complete(frame->f_frame));
     return frame_builtins_get((PyObject *)frame, NULL);
 }
 
@@ -2440,7 +2446,7 @@ PyFrame_GetLasti(PyFrameObject *frame)
 {
     int ret;
     Py_BEGIN_CRITICAL_SECTION(frame);
-    assert(!_PyFrame_IsIncomplete(frame->f_frame));
+    assert(is_complete(frame->f_frame));
     int lasti = _PyInterpreterFrame_LASTI(frame->f_frame);
     ret = lasti < 0 ? -1 : lasti * (int)sizeof(_Py_CODEUNIT);
     Py_END_CRITICAL_SECTION();
@@ -2450,6 +2456,6 @@ PyFrame_GetLasti(PyFrameObject *frame)
 PyObject *
 PyFrame_GetGenerator(PyFrameObject *frame)
 {
-    assert(!_PyFrame_IsIncomplete(frame->f_frame));
+    assert(is_complete(frame->f_frame));
     return frame_generator_get((PyObject *)frame, NULL);
 }

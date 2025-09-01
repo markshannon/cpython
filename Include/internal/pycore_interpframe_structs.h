@@ -27,28 +27,44 @@ enum _frameowner {
     FRAME_OWNED_BY_CSTACK = 4,
 };
 
-struct _PyInterpreterFrame {
-    _PyStackRef f_executable; /* Deferred or strong reference (code object or None) */
-    struct _PyInterpreterFrame *previous;
-    _PyStackRef f_funcobj; /* Deferred or strong reference. Only valid if not on C stack */
-    PyObject *f_globals; /* Borrowed reference. Only valid if not on C stack */
-    PyObject *f_builtins; /* Borrowed reference. Only valid if not on C stack */
-    PyObject *f_locals; /* Strong reference, may be NULL. Only valid if not on C stack */
-    PyFrameObject *frame_obj; /* Strong reference, may be NULL. Only valid if not on C stack */
-    _Py_CODEUNIT *instr_ptr; /* Instruction currently executing (or about to begin) */
-    _PyStackRef *stackpointer;
-#ifdef Py_GIL_DISABLED
-    /* Index of thread-local bytecode containing instr_ptr. */
-    int32_t tlbc_index;
-#endif
-    uint16_t return_offset;  /* Only relevant during a function call */
+struct _PyFrameCommon;
+
+/* We can't define this as a struct or it would leave a hole in
+ * _PyInterpreterFrame after owner */
+#define PY_FRAME_BASE \
+    _PyStackRef f_executable; /* Deferred or strong reference (code object or None) */ \
+    struct _PyFrameCommon *previous; \
     char owner;
+
+struct _PyFrameCommon {
+    PY_FRAME_BASE
+};
+
+struct _PyBuiltinFunctionFrame {
+    PY_FRAME_BASE
+};
+
+struct _PyInterpreterFrame {
+    PY_FRAME_BASE
+    /* The following fields are only valid for interpreter frames */
 #ifdef Py_DEBUG
     uint8_t visited:1;
     uint8_t lltrace:7;
 #else
     uint8_t visited;
 #endif
+    uint16_t return_offset;  /* Only meaningful during a function call */
+#ifdef Py_GIL_DISABLED
+    /* Index of thread-local bytecode containing instr_ptr. */
+    int32_t tlbc_index;
+#endif
+    _PyStackRef f_funcobj; /* Deferred or strong reference. */
+    PyObject *f_globals; /* Borrowed reference. */
+    PyObject *f_builtins; /* Borrowed reference. */
+    PyObject *f_locals; /* Strong reference, may be NULL. */
+    PyFrameObject *frame_obj; /* Strong reference, may be NULL. */
+    _Py_CODEUNIT *instr_ptr; /* Instruction currently executing (or about to begin) */
+    _PyStackRef *stackpointer;
     /* Locals and stack */
     _PyStackRef localsplus[1];
 };

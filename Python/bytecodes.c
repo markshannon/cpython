@@ -1214,7 +1214,6 @@ dummy_func(
 
         tier1 inst(INTERPRETER_EXIT, (retval --)) {
             assert(frame->owner == FRAME_OWNED_BY_INTERPRETER);
-            assert(_PyFrame_IsIncomplete(frame));
             /* Restore previous frame and return. */
             tstate->current_frame = frame->previous;
             assert(!_PyErr_Occurred(tstate));
@@ -1223,7 +1222,7 @@ dummy_func(
             assert(frame == &entry.frame);
 #endif
 #ifdef _Py_TIER2
-            _PyStackRef executor = frame->localsplus[0];
+            _PyStackRef executor = ((_PyEntryFrame *)frame)->executor;
             assert(tstate->current_executor == NULL);
             if (!PyStackRef_IsNull(executor)) {
                 tstate->current_executor = PyStackRef_AsPyObjectBorrow(executor);
@@ -1246,7 +1245,9 @@ dummy_func(
             _Py_LeaveRecursiveCallPy(tstate);
             // GH-99729: We need to unlink the frame *before* clearing it:
             _PyInterpreterFrame *dying = frame;
-            frame = tstate->current_frame = dying->previous;
+            frame = (_PyInterpreterFrame *)dying->previous;
+            tstate->current_frame = (_PyFrameCommon *)frame;
+            assert(frame->owner <= FRAME_OWNED_BY_INTERPRETER);
             _PyEval_FrameClearAndPop(tstate, dying);
             RELOAD_STACK();
             LOAD_IP(frame->return_offset);
@@ -1351,7 +1352,7 @@ dummy_func(
                 assert(INSTRUCTION_SIZE + oparg <= UINT16_MAX);
                 frame->return_offset = (uint16_t)(INSTRUCTION_SIZE + oparg);
                 assert(gen_frame->previous == NULL);
-                gen_frame->previous = frame;
+                gen_frame->previous = (_PyFrameCommon *)frame;
                 DISPATCH_INLINED(gen_frame);
             }
             if (PyStackRef_IsNone(v) && PyIter_Check(receiver_o)) {
@@ -1396,7 +1397,7 @@ dummy_func(
             tstate->exc_info = &gen->gi_exc_state;
             assert(INSTRUCTION_SIZE + oparg <= UINT16_MAX);
             frame->return_offset = (uint16_t)(INSTRUCTION_SIZE + oparg);
-            pushed_frame->previous = frame;
+            pushed_frame->previous = (_PyFrameCommon *)frame;
             gen_frame = PyStackRef_Wrap(pushed_frame);
         }
 
@@ -1423,7 +1424,8 @@ dummy_func(
             gen->gi_exc_state.previous_item = NULL;
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *gen_frame = frame;
-            frame = tstate->current_frame = frame->previous;
+            frame = (_PyInterpreterFrame *)gen_frame->previous;
+            tstate->current_frame = (_PyFrameCommon *)frame;
             gen_frame->previous = NULL;
             /* We don't know which of these is relevant here, so keep them equal */
             assert(INLINE_CACHE_ENTRIES_SEND == INLINE_CACHE_ENTRIES_FOR_ITER);
@@ -3447,7 +3449,7 @@ dummy_func(
             gen->gi_frame_state = FRAME_EXECUTING;
             gen->gi_exc_state.previous_item = tstate->exc_info;
             tstate->exc_info = &gen->gi_exc_state;
-            pushed_frame->previous = frame;
+            pushed_frame->previous = (_PyFrameCommon *)frame;
             // oparg is the return offset from the next instruction.
             frame->return_offset = (uint16_t)(INSTRUCTION_SIZE + oparg);
             gen_frame = PyStackRef_Wrap(pushed_frame);
@@ -3980,9 +3982,10 @@ dummy_func(
             DEAD(new_frame);
             SYNC_SP();
             _PyFrame_SetStackPointer(frame, stack_pointer);
-            assert(temp->previous == frame || temp->previous->previous == frame);
+            assert(temp->previous == (_PyFrameCommon *)frame || temp->previous->previous == (_PyFrameCommon *)frame);
             CALL_STAT_INC(inlined_py_calls);
-            frame = tstate->current_frame = temp;
+            frame = temp;
+            tstate->current_frame = (_PyFrameCommon *)temp;
             tstate->py_recursion_remaining--;
             LOAD_SP();
             LOAD_IP(0);
@@ -4975,9 +4978,10 @@ dummy_func(
             gen->gi_frame_state = FRAME_CREATED;
             gen_frame->owner = FRAME_OWNED_BY_GENERATOR;
             _Py_LeaveRecursiveCallPy(tstate);
-            _PyInterpreterFrame *prev = frame->previous;
+            _PyFrameCommon *prev = frame->previous;
             _PyThreadState_PopFrame(tstate, frame);
-            frame = tstate->current_frame = prev;
+            frame = (_PyInterpreterFrame *)prev;
+            tstate->current_frame = prev;
             LOAD_IP(frame->return_offset);
             RELOAD_STACK();
             res = PyStackRef_FromPyObjectStealMortal((PyObject *)gen);
@@ -5462,7 +5466,7 @@ dummy_func(
 
             /* Log traceback info. */
             assert(frame->owner != FRAME_OWNED_BY_INTERPRETER);
-            if (!_PyFrame_IsIncomplete(frame)) {
+            if (!_PyFrame_IsIncomplete((_PyFrameCommon *)frame)) {
                 PyFrameObject *f = _PyFrame_GetFrameObject(frame);
                 if (f != NULL) {
                     PyTraceBack_Here(f);
@@ -5533,7 +5537,8 @@ dummy_func(
             assert(frame->owner != FRAME_OWNED_BY_INTERPRETER);
             // GH-99729: We need to unlink the frame *before* clearing it:
             _PyInterpreterFrame *dying = frame;
-            frame = tstate->current_frame = dying->previous;
+            frame = (_PyInterpreterFrame *)dying->previous;
+            tstate->current_frame = dying->previous;
             _PyEval_FrameClearAndPop(tstate, dying);
             frame->return_offset = 0;
             if (frame->owner == FRAME_OWNED_BY_INTERPRETER) {
@@ -5543,7 +5548,7 @@ dummy_func(
                 assert(frame == &entry.frame);
 #endif
 #ifdef _Py_TIER2
-                _PyStackRef executor = frame->localsplus[0];
+                _PyStackRef executor = ((_PyEntryFrame *)frame)->executor;
                 assert(tstate->current_executor == NULL);
                 if (!PyStackRef_IsNull(executor)) {
                     tstate->current_executor = PyStackRef_AsPyObjectBorrow(executor);

@@ -494,9 +494,9 @@ _gen_throw(PyGenObject *gen, int close_on_genexit,
             /* Link frame into the stack to enable complete backtraces. */
             /* XXX We should probably be updating the current frame somewhere in
                ceval.c. */
-            _PyInterpreterFrame *prev = tstate->current_frame;
+            _PyFrameCommon *prev = tstate->current_frame;
             frame->previous = prev;
-            tstate->current_frame = frame;
+            tstate->current_frame = (_PyFrameCommon *)frame;
             /* Close the generator that we are currently iterating with
                'yield from' or awaiting on with 'await'. */
             PyFrameState state = gen->gi_frame_state;
@@ -518,9 +518,9 @@ _gen_throw(PyGenObject *gen, int close_on_genexit,
                 goto throw_here;
             }
 
-            _PyInterpreterFrame *prev = tstate->current_frame;
+            _PyFrameCommon *prev = tstate->current_frame;
             frame->previous = prev;
-            tstate->current_frame = frame;
+            tstate->current_frame = (_PyFrameCommon *)frame;
             PyFrameState state = gen->gi_frame_state;
             gen->gi_frame_state = FRAME_EXECUTING;
             ret = PyObject_CallFunctionObjArgs(meth, typ, val, tb, NULL);
@@ -976,11 +976,12 @@ _Py_MakeCoro(PyFunctionObject *func)
     if (origin_depth == 0) {
         ((PyCoroObject *)coro)->cr_origin_or_finalizer = NULL;
     } else {
-        _PyInterpreterFrame *frame = tstate->current_frame;
+        _PyFrameCommon *frame = tstate->current_frame;
         assert(frame);
+        assert(frame->owner == FRAME_OWNED_BY_THREAD);
         assert(_PyFrame_IsIncomplete(frame));
-        frame = _PyFrame_GetFirstComplete(frame->previous);
-        PyObject *cr_origin = compute_cr_origin(origin_depth, frame);
+        _PyInterpreterFrame *iframe = _PyFrame_GetFirstComplete(frame->previous);
+        PyObject *cr_origin = compute_cr_origin(origin_depth, iframe);
         ((PyCoroObject *)coro)->cr_origin_or_finalizer = cr_origin;
         if (!cr_origin) {
             Py_DECREF(coro);

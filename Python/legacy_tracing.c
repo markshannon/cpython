@@ -675,7 +675,7 @@ set_monitoring_trace_events(PyInterpreterState *interp)
 static int
 maybe_set_opcode_trace(PyThreadState *tstate)
 {
-    _PyInterpreterFrame *iframe = tstate->current_frame;
+    _PyInterpreterFrame *iframe = _PyThreadState_GetFrame(tstate);
     if (iframe == NULL) {
         return 0;
     }

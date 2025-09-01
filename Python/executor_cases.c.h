@@ -1927,7 +1927,9 @@
             assert(STACK_LEVEL() == 0);
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *dying = frame;
-            frame = tstate->current_frame = dying->previous;
+            frame = (_PyInterpreterFrame *)dying->previous;
+            tstate->current_frame = (_PyFrameCommon *)frame;
+            assert(frame->owner <= FRAME_OWNED_BY_INTERPRETER);
             _PyEval_FrameClearAndPop(tstate, dying);
             stack_pointer = _PyFrame_GetStackPointer(frame);
             LOAD_IP(frame->return_offset);
@@ -2059,7 +2061,7 @@
             tstate->exc_info = &gen->gi_exc_state;
             assert( 2 + oparg <= UINT16_MAX);
             frame->return_offset = (uint16_t)( 2 + oparg);
-            pushed_frame->previous = frame;
+            pushed_frame->previous = (_PyFrameCommon *)frame;
             gen_frame = PyStackRef_Wrap(pushed_frame);
             stack_pointer[-1] = gen_frame;
             break;
@@ -2084,7 +2086,8 @@
             gen->gi_exc_state.previous_item = NULL;
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *gen_frame = frame;
-            frame = tstate->current_frame = frame->previous;
+            frame = (_PyInterpreterFrame *)gen_frame->previous;
+            tstate->current_frame = (_PyFrameCommon *)frame;
             gen_frame->previous = NULL;
             assert(INLINE_CACHE_ENTRIES_SEND == INLINE_CACHE_ENTRIES_FOR_ITER);
             #if TIER_ONE
@@ -4609,7 +4612,7 @@
             gen->gi_frame_state = FRAME_EXECUTING;
             gen->gi_exc_state.previous_item = tstate->exc_info;
             tstate->exc_info = &gen->gi_exc_state;
-            pushed_frame->previous = frame;
+            pushed_frame->previous = (_PyFrameCommon *)frame;
             frame->return_offset = (uint16_t)( 2 + oparg);
             gen_frame = PyStackRef_Wrap(pushed_frame);
             stack_pointer[0] = gen_frame;
@@ -5338,9 +5341,10 @@
             stack_pointer += -1;
             assert(WITHIN_STACK_BOUNDS());
             _PyFrame_SetStackPointer(frame, stack_pointer);
-            assert(temp->previous == frame || temp->previous->previous == frame);
+            assert(temp->previous == (_PyFrameCommon *)frame || temp->previous->previous == (_PyFrameCommon *)frame);
             CALL_STAT_INC(inlined_py_calls);
-            frame = tstate->current_frame = temp;
+            frame = temp;
+            tstate->current_frame = (_PyFrameCommon *)temp;
             tstate->py_recursion_remaining--;
             LOAD_SP();
             LOAD_IP(0);
@@ -6745,9 +6749,10 @@
             gen->gi_frame_state = FRAME_CREATED;
             gen_frame->owner = FRAME_OWNED_BY_GENERATOR;
             _Py_LeaveRecursiveCallPy(tstate);
-            _PyInterpreterFrame *prev = frame->previous;
+            _PyFrameCommon *prev = frame->previous;
             _PyThreadState_PopFrame(tstate, frame);
-            frame = tstate->current_frame = prev;
+            frame = (_PyInterpreterFrame *)prev;
+            tstate->current_frame = prev;
             LOAD_IP(frame->return_offset);
             stack_pointer = _PyFrame_GetStackPointer(frame);
             res = PyStackRef_FromPyObjectStealMortal((PyObject *)gen);

@@ -77,13 +77,15 @@ def _managed_dict_offset():
     else:
         return -3 * _sizeof_void_p()
 
+
+_INTERP_FRAME = gdb.lookup_type("_PyInterpreterFrame")
+
 _INTERP_FRAME_HAS_TLBC_INDEX = None
 def interp_frame_has_tlbc_index():
     global _INTERP_FRAME_HAS_TLBC_INDEX
     if _INTERP_FRAME_HAS_TLBC_INDEX is None:
-        interp_frame = gdb.lookup_type("_PyInterpreterFrame")
         _INTERP_FRAME_HAS_TLBC_INDEX = any(field.name == "tlbc_index"
-                                           for field in interp_frame.fields())
+                                           for field in _INTERP_FRAME.fields())
     return _INTERP_FRAME_HAS_TLBC_INDEX
 
 Py_TPFLAGS_INLINE_VALUES     = (1 << 2)
@@ -1043,7 +1045,7 @@ class PyFrameObjectPtr(PyObjectPtr):
 class PyFramePtr:
 
     def __init__(self, gdbval):
-        self._gdbval = gdbval
+        self._gdbval = gdbval.cast(_INTERP_FRAME.pointer())
 
         if not self.is_optimized_out():
             try:
