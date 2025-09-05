@@ -1,0 +1,3 @@
+Handle artificial code objects (such as produced by Cython) gracefully in
+``sys.monitoring.set_local_events``. No events are set, but it no longer
+raises a ``SystemError``.
