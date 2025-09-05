@@ -2040,11 +2040,16 @@ _PyMonitoring_SetLocalEvents(PyCodeObject *code, int tool_id, _PyMonitoringEvent
     assert(0 <= tool_id && tool_id < PY_MONITORING_TOOL_IDS);
     PyInterpreterState *interp = _PyInterpreterState_GET();
     assert(events < (1 << _PY_MONITORING_LOCAL_EVENTS));
-    if (code->_co_firsttraceable >= Py_SIZE(code)) {
-        PyErr_Format(PyExc_SystemError, "cannot instrument shim code object '%U'", code->co_name);
+    if (check_tool(interp, tool_id)) {
         return -1;
     }
-    if (check_tool(interp, tool_id)) {
+    Py_ssize_t size = Py_SIZE(code);
+    if (size < 2) {
+        /* Artificial code object, e.g. Cython */
+        return 0;
+    }
+    if (code->_co_firsttraceable >= size) {
+        PyErr_Format(PyExc_SystemError, "cannot instrument shim code object '%U'", code->co_name);
         return -1;
     }
 
