@@ -2555,6 +2555,34 @@ toggle_reftrace_printer(PyObject *ob, PyObject *arg)
     Py_RETURN_NONE;
 }
 
+struct _PyCode1 _PyCode_DEF(1);
+
+const struct _PyCode1 fake_code_object = {
+    _PyVarObject_HEAD_INIT(&PyCode_Type, 1),
+    .co_consts = (PyObject *)&_Py_SINGLETON(tuple_empty),
+    .co_names = (PyObject *)&_Py_SINGLETON(tuple_empty),
+    .co_exceptiontable = (PyObject *)&_Py_SINGLETON(bytes_empty),
+    .co_flags = 0,
+    .co_localsplusnames = (PyObject *)&_Py_SINGLETON(tuple_empty),
+    .co_localspluskinds = (PyObject *)&_Py_SINGLETON(bytes_empty),
+    .co_filename = &_Py_ID(fake),
+    .co_name = &_Py_ID(fake),
+    .co_qualname = &_Py_ID(fake),
+    .co_linetable = NULL,
+    ._co_firsttraceable = 2,
+    .co_stacksize = 0,
+    .co_framesize = 0,
+    .co_code_adaptive = {
+        0
+    }
+};
+
+static PyObject *
+get_artificial_code_object(PyObject *self, PyObject *arg)
+{
+    return (PyObject *)&fake_code_object;
+}
+
 static PyMethodDef TestMethods[] = {
     {"set_errno",               set_errno,                       METH_VARARGS},
     {"test_config",             test_config,                     METH_NOARGS},
@@ -2649,6 +2677,7 @@ static PyMethodDef TestMethods[] = {
     {"test_atexit", test_atexit, METH_NOARGS},
     {"code_offset_to_line", _PyCFunction_CAST(code_offset_to_line), METH_FASTCALL},
     {"toggle_reftrace_printer", toggle_reftrace_printer, METH_O},
+    {"get_artificial_code_object", get_artificial_code_object, METH_O},
     {NULL, NULL} /* sentinel */
 };
 
