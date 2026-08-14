@@ -692,6 +692,12 @@ Miscellaneous options
 
      .. versionadded:: 3.13
 
+   * :samp:`-X gc={incremental,legacy}` selects the cyclic garbage collector
+     for a GIL-enabled build.  The default is ``incremental``.  The selected
+     implementation is reported by :func:`gc.get_implementation`.
+
+     .. versionadded:: 3.16
+
    * :samp:`-X thread_inherit_context={0,1}` causes :class:`~threading.Thread`
      to, by default, use a copy of context of the caller of
      ``Thread.start()`` when starting.  Otherwise, threads will start

@@ -141,14 +141,23 @@ typedef enum {
     _Py_GC_REASON_MANUAL
 } _PyGC_Reason;
 
-// Lowest bit of _gc_next is used for flags only in GC.
-// But it is always 0 for normal code.
+/* The two lowest bits of _gc_next are available because GC heads are aligned.
+   Bit 0 is the transient unreachable marker, and marks frozen objects while
+   they reside in the permanent generation.  Those uses cannot overlap.
+   Bit 1 persistently identifies which incremental old-generation space
+   contains an object. */
+#define _PyGC_NEXT_MASK_UNREACHABLE ((uintptr_t)1)
+#define _PyGC_NEXT_MASK_OLD_SPACE   ((uintptr_t)2)
+#define _PyGC_NEXT_MASK             ((uintptr_t)3)
+
 static inline PyGC_Head* _PyGCHead_NEXT(PyGC_Head *gc) {
-    uintptr_t next = gc->_gc_next;
+    uintptr_t next = gc->_gc_next & ~_PyGC_NEXT_MASK;
     return (PyGC_Head*)next;
 }
 static inline void _PyGCHead_SET_NEXT(PyGC_Head *gc, PyGC_Head *next) {
-    gc->_gc_next = (uintptr_t)next;
+    uintptr_t unext = (uintptr_t)next;
+    assert((unext & _PyGC_NEXT_MASK) == 0);
+    gc->_gc_next = (gc->_gc_next & _PyGC_NEXT_MASK) | unext;
 }
 
 // Lowest two bits of _gc_prev is used for _PyGC_PREV_MASK_* flags.
@@ -230,7 +239,6 @@ static inline void _PyObject_GC_TRACK(
     _PyGCHead_SET_PREV(gc, last);
     _PyGCHead_SET_NEXT(gc, generation0);
     generation0->_gc_prev = (uintptr_t)gc;
-    gcstate->heap_size++;
 #endif
 }
 
@@ -265,8 +273,6 @@ static inline void _PyObject_GC_UNTRACK(
     _PyGCHead_SET_PREV(next, prev);
     gc->_gc_next = 0;
     gc->_gc_prev &= _PyGC_PREV_MASK_FINALIZED;
-    struct _gc_runtime_state *gcstate = &_PyInterpreterState_GET()->gc;
-    gcstate->heap_size--;
 #endif
 }
 
@@ -314,6 +320,7 @@ static inline void _PyObject_GC_UNTRACK(
 */
 
 extern void _PyGC_InitState(struct _gc_runtime_state *);
+extern int _PyGC_ResizeAgingSpace(struct _gc_runtime_state *, int);
 
 extern Py_ssize_t _PyGC_Collect(PyThreadState *tstate, int generation, _PyGC_Reason reason);
 extern void _PyGC_CollectNoFail(PyThreadState *tstate);

@@ -35,12 +35,25 @@ The :mod:`!gc` module provides the following functions:
    Return ``True`` if automatic collection is enabled.
 
 
+.. function:: get_implementation()
+
+   Return ``"incremental"`` or ``"legacy"``, identifying the cyclic garbage
+   collector selected at interpreter startup.  In GIL-enabled builds the
+   incremental collector is the default and ``-X gc=legacy`` selects the
+   legacy collector.  Free-threaded builds use the legacy collector.
+
+
 .. function:: collect(generation=2)
 
    With no arguments, run a full collection.  The optional argument *generation*
    may be an integer specifying which generation to collect (from 0 to 2).  A
    :exc:`ValueError` is raised if the generation number is invalid. The sum of
    collected objects and uncollectable objects is returned.
+
+   With the incremental collector, generation 0 performs a young collection,
+   generation 1 performs an old-generation increment, and generation 2
+   collects the whole heap.  The legacy collector retains the traditional
+   three-generation behavior.
 
    The free lists maintained for a number of built-in types are cleared
    whenever a full collection or collection of the highest generation (2)
@@ -55,6 +68,10 @@ The :mod:`!gc` module provides the following functions:
 
    .. versionchanged:: 3.14.5
       ``generation=1`` performs collection of the middle generation.
+
+   .. versionchanged:: 3.16
+      With the incremental collector, ``generation=1`` performs an
+      old-generation increment.
 
 
 .. function:: set_debug(flags)
@@ -75,6 +92,9 @@ The :mod:`!gc` module provides the following functions:
    returned. If *generation* is not ``None``, return only the objects tracked by
    the collector that are in that generation.
 
+   For the incremental collector, generation 0 contains the nursery and aging
+   spaces, generation 1 is empty, and generation 2 contains old objects.
+
    .. versionchanged:: 3.8
       New *generation* parameter.
 
@@ -93,6 +113,10 @@ The :mod:`!gc` module provides the following functions:
    in the future, but currently each dictionary will contain the following
    items:
 
+   With the incremental collector, automatic and explicit old-generation
+   increments are reported as generation 1, while full collections are
+   reported as generation 2.
+
    * ``collections`` is the number of times this generation was collected;
 
    * ``collected`` is the total number of objects collected inside this
@@ -108,10 +132,16 @@ The :mod:`!gc` module provides the following functions:
    * ``duration`` is the total time in seconds spent in collections for this
      generation.
 
+   * ``max_pause`` is the maximum time in seconds spent in a single collection
+     for this generation.
+
    .. versionadded:: 3.4
 
    .. versionchanged:: 3.15
       Add ``duration`` and ``candidates``.
+
+   .. versionchanged:: 3.16
+      Add ``max_pause``.
 
 
 .. function:: set_threshold(threshold0, [threshold1, [threshold2]])
@@ -119,16 +149,27 @@ The :mod:`!gc` module provides the following functions:
    Set the garbage collection thresholds (the collection frequency). Setting
    *threshold0* to zero disables collection.
 
+   For both collectors in a GIL-enabled build, *threshold0* is the nursery size
+   in KiB; automatic collection is scheduled after that amount is allocated.
+   For the incremental collector, *threshold1* controls the number of aging
+   spaces (two units correspond to one space), and larger values of
+   *threshold2* make collection of the old generation slower.  The defaults are
+   ``(1000, 10, 10)``, giving five aging spaces.  Changes to *threshold1* resize
+   the aging generation immediately.
+
+   For the legacy collector, *threshold1* and *threshold2* retain their
+   traditional meanings.
+
+   In a free-threaded build, *threshold0* retains its traditional meaning as
+   the net number of object allocations since the last collection.
+
    The GC classifies objects into three generations depending on how many
    collection sweeps they have survived.  New objects are placed in the youngest
    generation (generation ``0``).  If an object survives a collection it is moved
    into the next older generation.  Since generation ``2`` is the oldest
    generation, objects in that generation remain there after a collection.  In
-   order to decide when to run, the collector keeps track of the number object
-   allocations and deallocations since the last collection.  When the number of
-   allocations minus the number of deallocations exceeds *threshold0*, collection
-   starts.  Initially only generation ``0`` is examined.  If generation ``0`` has
-   been examined more than *threshold1* times since generation ``1`` has been
+   Initially only generation ``0`` is examined.  If generation ``0`` has been
+   examined more than *threshold1* times since generation ``1`` has been
    examined, then generation ``1`` is examined as well.
    With the third generation, things are a bit more complicated,
    see `Collecting the oldest generation <https://github.com/python/cpython/blob/ff0ef0a54bef26fc507fbf9b7a6009eb7d3f17f5/InternalDocs/garbage_collector.md#collecting-the-oldest-generation>`_ for more information.

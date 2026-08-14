@@ -53,9 +53,9 @@ read_gc_stats(struct gc_stats *stats, int64_t iid, PyObject *result,
             SET_FIELD(PyLong_FromSsize_t, items->collected);
             SET_FIELD(PyLong_FromSsize_t, items->uncollectable);
             SET_FIELD(PyLong_FromSsize_t, items->candidates);
-            SET_FIELD(PyLong_FromSsize_t, items->heap_size);
 
             SET_FIELD(PyFloat_FromDouble, items->duration);
+            SET_FIELD(PyFloat_FromDouble, items->max_pause);
 
             int rc = PyList_Append(result, item);
             Py_CLEAR(item);

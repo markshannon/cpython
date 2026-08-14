@@ -391,29 +391,12 @@ class GCTests(unittest.TestCase):
         gc.disable()
         gc.set_threshold(*thresholds)
 
-    # The following two tests are fragile:
-    # They precisely count the number of allocations,
-    # which is highly implementation-dependent.
-    # For example, disposed tuples are not freed, but reused.
-    # To minimize variations, though, we first store the get_count() results
-    # and check them at the end.
-    @refcount_test
-    @requires_gil_enabled('needs precise allocation counts')
-    def test_get_count(self):
-        gc.collect()
-        a, b, c = gc.get_count()
-        x = []
-        d, e, f = gc.get_count()
-        self.assertEqual((b, c), (0, 0))
-        self.assertEqual((e, f), (0, 0))
-        # This is less fragile than asserting that a equals 0.
-        self.assertLess(a, 5)
-        # Between the two calls to get_count(), at least one object was
-        # created (the list).
-        self.assertGreater(d, a)
 
     @refcount_test
+    @requires_gil_enabled('requires the legacy three-generation collector')
     def test_collect_generations(self):
+        if gc.get_implementation() != "legacy":
+            self.skipTest("requires legacy GC")
         gc.collect()
         # This object will "trickle" into generation N + 1 after
         # each call to collect(N)
@@ -856,13 +839,16 @@ class GCTests(unittest.TestCase):
             self.assertIsInstance(st, dict)
             self.assertEqual(
                 set(st),
-                {"collected", "collections", "uncollectable", "candidates", "duration"}
+                {"collected", "collections", "uncollectable", "candidates",
+                 "duration", "max_pause"}
             )
             self.assertGreaterEqual(st["collected"], 0)
             self.assertGreaterEqual(st["collections"], 0)
             self.assertGreaterEqual(st["uncollectable"], 0)
             self.assertGreaterEqual(st["candidates"], 0)
             self.assertGreaterEqual(st["duration"], 0)
+            self.assertGreaterEqual(st["max_pause"], 0)
+            self.assertLessEqual(st["max_pause"], st["duration"])
         # Check that collection counts are incremented correctly
         if gc.isenabled():
             self.addCleanup(gc.enable)
@@ -876,6 +862,9 @@ class GCTests(unittest.TestCase):
         self.assertGreater(new[0]["duration"], old[0]["duration"])
         self.assertEqual(new[1]["duration"], old[1]["duration"])
         self.assertEqual(new[2]["duration"], old[2]["duration"])
+        self.assertGreaterEqual(new[0]["max_pause"], old[0]["max_pause"])
+        self.assertEqual(new[1]["max_pause"], old[1]["max_pause"])
+        self.assertEqual(new[2]["max_pause"], old[2]["max_pause"])
         for stat in ["collected", "uncollectable", "candidates"]:
             self.assertGreaterEqual(new[0][stat], old[0][stat])
             self.assertEqual(new[1][stat], old[1][stat])
@@ -888,6 +877,9 @@ class GCTests(unittest.TestCase):
         self.assertEqual(new[0]["duration"], old[0]["duration"])
         self.assertEqual(new[1]["duration"], old[1]["duration"])
         self.assertGreater(new[2]["duration"], old[2]["duration"])
+        self.assertEqual(new[0]["max_pause"], old[0]["max_pause"])
+        self.assertEqual(new[1]["max_pause"], old[1]["max_pause"])
+        self.assertGreaterEqual(new[2]["max_pause"], old[2]["max_pause"])
         for stat in ["collected", "uncollectable", "candidates"]:
             self.assertEqual(new[0][stat], old[0][stat])
             self.assertEqual(new[1][stat], old[1][stat])
@@ -922,25 +914,26 @@ class GCTests(unittest.TestCase):
                 any(l is element for element in gc.get_objects(generation=2))
         )
         gc.collect(generation=0)
-        self.assertFalse(
-                any(l is element for element in gc.get_objects(generation=0))
-        )
-        self.assertTrue(
-                any(l is element for element in gc.get_objects(generation=1))
-        )
-        self.assertFalse(
-                any(l is element for element in gc.get_objects(generation=2))
-        )
-        gc.collect(generation=1)
-        self.assertFalse(
-                any(l is element for element in gc.get_objects(generation=0))
-        )
-        self.assertFalse(
-                any(l is element for element in gc.get_objects(generation=1))
-        )
-        self.assertTrue(
-                any(l is element for element in gc.get_objects(generation=2))
-        )
+        if gc.get_implementation() == "legacy":
+            self.assertFalse(
+                    any(l is element for element in gc.get_objects(generation=0))
+            )
+            self.assertTrue(
+                    any(l is element for element in gc.get_objects(generation=1))
+            )
+            self.assertFalse(
+                    any(l is element for element in gc.get_objects(generation=2))
+            )
+            gc.collect(generation=1)
+            self.assertFalse(
+                    any(l is element for element in gc.get_objects(generation=0))
+            )
+            self.assertFalse(
+                    any(l is element for element in gc.get_objects(generation=1))
+            )
+            self.assertTrue(
+                    any(l is element for element in gc.get_objects(generation=2))
+            )
         gc.collect(generation=2)
         self.assertFalse(
                 any(l is element for element in gc.get_objects(generation=0))
@@ -953,6 +946,127 @@ class GCTests(unittest.TestCase):
         )
         del l
         gc.collect()
+
+    def test_get_implementation(self):
+        self.assertIn(gc.get_implementation(), {"incremental", "legacy"})
+        if Py_GIL_DISABLED:
+            self.assertEqual(gc.get_implementation(), "legacy")
+
+    @requires_subprocess()
+    def test_default_thresholds(self):
+        code = "import gc; assert gc.get_threshold() == (1000, 10, 10)"
+        assert_python_ok("-c", code)
+        if not Py_GIL_DISABLED:
+            assert_python_ok("-X", "gc=legacy", "-c", code)
+
+    @requires_gil_enabled('incremental GC is only used by the GIL build')
+    def test_incremental_collection_generations(self):
+        if gc.get_implementation() != "incremental":
+            self.skipTest("requires incremental GC")
+        enabled = gc.isenabled()
+        self.addCleanup(gc.enable if enabled else gc.disable)
+        gc.disable()
+        gc.collect()
+
+        before = gc.get_stats()
+
+        class Cycle:
+            pass
+        cycle = Cycle()
+        cycle.self = cycle
+        cycle_ref = weakref.ref(cycle)
+        del cycle
+        gc.collect(1)
+        self.assertIsNotNone(cycle_ref())
+        after_increment = gc.get_stats()
+        self.assertEqual(
+            after_increment[0]["collections"], before[0]["collections"])
+        self.assertEqual(
+            after_increment[1]["collections"], before[1]["collections"] + 1)
+        self.assertEqual(
+            after_increment[2]["collections"], before[2]["collections"])
+
+        for _ in range(10):
+            gc.collect(0)
+        self.assertIsNone(cycle_ref())
+        after_young = gc.get_stats()
+        self.assertEqual(
+            after_young[0]["collections"],
+            after_increment[0]["collections"] + 10)
+        self.assertEqual(
+            after_young[1]["collections"], after_increment[1]["collections"])
+        self.assertEqual(
+            after_young[2]["collections"], after_increment[2]["collections"])
+
+        gc.collect()
+        after_full = gc.get_stats()
+        self.assertEqual(
+            after_full[0]["collections"], after_young[0]["collections"])
+        self.assertEqual(
+            after_full[1]["collections"], after_young[1]["collections"])
+        self.assertEqual(
+            after_full[2]["collections"],
+            after_young[2]["collections"] + 1)
+
+    @requires_gil_enabled('incremental GC is only used by the GIL build')
+    def test_resize_aging_spaces(self):
+        if gc.get_implementation() != "incremental":
+            self.skipTest("requires incremental GC")
+        thresholds = gc.get_threshold()
+        self.addCleanup(gc.set_threshold, *thresholds)
+        for threshold1 in (2, 40, 7, 10):
+            gc.set_threshold(thresholds[0], threshold1, thresholds[2])
+            self.assertEqual(gc.get_threshold()[1], threshold1)
+            self.assertEqual(len(gc.get_objects(generation=1)), 0)
+
+        def resize_during_collection(phase, info):
+            if phase == "start":
+                gc.set_threshold(thresholds[0], 20, thresholds[2])
+
+        gc.callbacks.append(resize_during_collection)
+        try:
+            gc.collect(0)
+        finally:
+            gc.callbacks.remove(resize_during_collection)
+        self.assertEqual(gc.get_threshold()[1], 20)
+
+        with self.assertRaises(ValueError):
+            gc.set_threshold(thresholds[0], 1 << 30, thresholds[2])
+        self.assertEqual(gc.get_threshold()[1], 20)
+
+    @requires_subprocess()
+    @requires_gil_enabled('incremental GC is only used by the GIL build')
+    def test_legacy_implementation_option(self):
+        code = "import gc; assert gc.get_implementation() == 'incremental'"
+        assert_python_ok("-c", code)
+        code = """
+            import gc
+            assert gc.get_implementation() == 'legacy'
+            assert len(gc.get_threshold()) == 3
+            assert len(gc.get_count()) == 3
+            assert len(gc.get_stats()) == 3
+            cycle = []
+            cycle.append(cycle)
+            gc.collect(0)
+            assert cycle in gc.get_objects(1)
+
+            collections = []
+            def callback(phase, info):
+                if phase == "start":
+                    collections.append(info["generation"])
+
+            gc.callbacks.append(callback)
+            gc.set_threshold(10, 1000, 1000)
+            gc.collect(2)
+            collections.clear()
+
+            cycle = []
+            cycle.append(cycle)
+            del cycle
+            large = tuple(range(10_000))
+            assert collections == [0], collections
+        """
+        assert_python_ok("-X", "gc=legacy", "-c", textwrap.dedent(code))
 
     def test_get_objects_arguments(self):
         gc.collect()
@@ -1213,6 +1327,29 @@ class GCTests(unittest.TestCase):
         gc.collect()
         gc.unfreeze()
 
+    @requires_gil_enabled('incremental GC is only used by the GIL build')
+    def test_incremental_old_skips_frozen_objects(self):
+        if gc.get_implementation() != "incremental":
+            self.skipTest("requires incremental GC")
+        thresholds = gc.get_threshold()
+        self.addCleanup(gc.set_threshold, *thresholds)
+        enabled = gc.isenabled()
+        self.addCleanup(gc.enable if enabled else gc.disable)
+        gc.disable()
+        gc.collect()
+        frozen = [{} for _ in range(100)]
+        gc.freeze()
+        self.addCleanup(gc.unfreeze)
+        frozen_count = gc.get_freeze_count()
+
+        holder = [frozen]
+        holder.append(holder)
+        gc.collect(0)
+        gc.set_threshold(1, 2, thresholds[2])
+        gc.enable()
+        junk = [[] for _ in range(1000)]
+        self.assertEqual(gc.get_freeze_count(), frozen_count)
+
     def test_deferred_refcount_frozen(self):
         # Also from GH-126312: objects that use deferred reference counting
         # weren't ignored if they were frozen. Unfortunately, it's pretty
@@ -1287,16 +1424,6 @@ class GCTests(unittest.TestCase):
         self.assertFalse(gc.is_tracked(tuples[0]))
         # Use n // 2 just in case some other objects were collected.
         self.assertTrue(new_count - count > (n // 2))
-
-    @requires_gil_enabled('need generational GC')
-    @unittest.skipIf(_testinternalcapi is None, "requires _testinternalcapi")
-    def test_heap_size(self):
-        count = _testinternalcapi.get_tracked_heap_size()
-        l = []
-        self.assertEqual(count + 1, _testinternalcapi.get_tracked_heap_size())
-        del l
-        self.assertEqual(count, _testinternalcapi.get_tracked_heap_size())
-
 
 class GCCallbackTests(unittest.TestCase):
     def setUp(self):
@@ -1496,6 +1623,10 @@ class GCTogglingTests(unittest.TestCase):
         # Corresponds to temp2c.py in the bug report.  This is pretty
         # elaborate.
 
+        thresholds = gc.get_threshold()
+        self.addCleanup(gc.set_threshold, *thresholds)
+        gc.set_threshold(10, thresholds[1], thresholds[2])
+
         c0 = C1055820(0)
         # Move c0 into generation 2.
         gc.collect()
@@ -1574,6 +1705,9 @@ class GCTogglingTests(unittest.TestCase):
         # test_bug1055820c, but uses a __del__ method instead of a weakref
         # callback to sneak in a resurrection of cyclic trash.
 
+        _, threshold1, threshold2 = gc.get_threshold()
+        gc.set_threshold(10, threshold1, threshold2)
+
         ouch = []
         class D(C1055820):
             def __del__(self):
@@ -1642,6 +1776,9 @@ class GCTogglingTests(unittest.TestCase):
 
     @gc_threshold(1000, 0, 0)
     def test_indirect_calls_with_gc_disabled(self):
+        if not Py_GIL_DISABLED:
+            _, threshold1, threshold2 = gc.get_threshold()
+            gc.set_threshold(10, threshold1, threshold2)
         junk = []
         i = 0
         detector = GC_Detector()

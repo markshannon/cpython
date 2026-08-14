@@ -170,6 +170,25 @@ typedef struct {
 
 #define _PyGC_Head_UNUSED PyGC_Head
 
+struct gc_young_generation {
+    Py_ssize_t available_memory;
+    PyGC_Head nursery;
+    int threshold;
+    int aging_threshold;
+    int aging_spaces;
+    int next;
+    int count;
+    PyGC_Head *aging;
+};
+
+#define _PyGC_DEFAULT_NURSERY_THRESHOLD 1000
+#define _PyGC_NURSERY_SIZE_UNIT 1024
+
+enum gc_implementation {
+    GC_IMPL_LEGACY,
+    GC_IMPL_INCREMENTAL,
+};
+
 struct gc_generation {
     PyGC_Head head;
     int threshold; /* collection threshold */
@@ -191,8 +210,8 @@ struct gc_generation_stats {
     Py_ssize_t candidates;
     // Total duration of the collection in seconds:
     double duration;
-    /* heap_size on the start of the collection */
-    Py_ssize_t heap_size;
+    // Maximum duration of a single collection in seconds:
+    double max_pause;
 };
 
 #ifdef Py_GIL_DISABLED
@@ -227,7 +246,9 @@ struct _gc_runtime_state {
     int debug;
     /* linked lists of container objects */
 #ifndef Py_GIL_DISABLED
-    struct gc_generation generations[NUM_GENERATIONS];
+    enum gc_implementation implementation;
+    struct gc_young_generation young;
+    struct gc_generation old[2];
 #else
     struct gc_generation young;
     struct gc_generation old[2];
@@ -251,9 +272,6 @@ struct _gc_runtime_state {
     /* a list of callbacks to be invoked when collection is performed */
     PyObject *callbacks;
 
-    /* The number of live objects. */
-    Py_ssize_t heap_size;
-
     /* This is the number of objects that survived the last full
        collection. It approximates the number of long lived objects
        tracked by the GC.
@@ -270,21 +288,34 @@ struct _gc_runtime_state {
     /* True if gc.freeze() has been used. */
     int freeze_active;
 #else
+    /* Objects are appended to this head when first tracked. */
     PyGC_Head *generation0;
+    /* The old generation is incrementally scavenged from the pending space
+       into the visited space. */
+    int visited_space;
+    int next_gen;
+    Py_ssize_t old_work;
 #endif
 };
 
 #ifndef Py_GIL_DISABLED
 #define GC_GENERATION_INIT \
-    .generations = { \
-        { .threshold = 2000, }, \
+    .implementation = GC_IMPL_INCREMENTAL, \
+    .young = { \
+        .threshold = _PyGC_DEFAULT_NURSERY_THRESHOLD, \
+        .aging_threshold = 10, \
+        .aging_spaces = 5, \
+        .available_memory = _PyGC_DEFAULT_NURSERY_THRESHOLD * \
+                            _PyGC_NURSERY_SIZE_UNIT, \
+    }, \
+    .old = { \
         { .threshold = 10, }, \
         { .threshold = 10, }, \
     }, \
-    .heap_size = 0,
+    .old_work = -100000,
 #else
 #define GC_GENERATION_INIT \
-    .young = { .threshold = 2000, }, \
+    .young = { .threshold = _PyGC_DEFAULT_NURSERY_THRESHOLD, }, \
     .old = { \
         { .threshold = 10, }, \
         { .threshold = 10, }, \

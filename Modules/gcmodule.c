@@ -159,12 +159,33 @@ gc_set_threshold_impl(PyObject *module, int threshold0, int group_right_1,
     GCState *gcstate = get_gc_state();
 
 #ifndef Py_GIL_DISABLED
-    gcstate->generations[0].threshold = threshold0;
-    if (group_right_1) {
-        gcstate->generations[1].threshold = threshold1;
+    if (gcstate->implementation == GC_IMPL_LEGACY) {
+        gcstate->young.threshold = threshold0;
+        gcstate->young.available_memory =
+            (Py_ssize_t)threshold0 * _PyGC_NURSERY_SIZE_UNIT;
+        if (group_right_1) {
+            gcstate->old[0].threshold = threshold1;
+        }
+        if (group_right_2) {
+            gcstate->old[1].threshold = threshold2;
+        }
     }
-    if (group_right_2) {
-        gcstate->generations[2].threshold = threshold2;
+    else {
+        if (threshold1 <= 0) {
+            threshold1 = 1;
+        }
+        if (group_right_1 &&
+            _PyGC_ResizeAgingSpace(gcstate, threshold1) < 0)
+        {
+            return NULL;
+        }
+        gcstate->young.threshold = threshold0;
+        gcstate->young.available_memory =
+            (Py_ssize_t)threshold0 * _PyGC_NURSERY_SIZE_UNIT;
+        if (group_right_2) {
+            gcstate->old[0].threshold = threshold2;
+            gcstate->old[1].threshold = threshold2;
+        }
     }
 #else
     PyInterpreterState *interp = _PyInterpreterState_GET();
@@ -193,10 +214,16 @@ gc_get_threshold_impl(PyObject *module)
 {
     GCState *gcstate = get_gc_state();
 #ifndef Py_GIL_DISABLED
+    if (gcstate->implementation == GC_IMPL_LEGACY) {
+        return Py_BuildValue("(iii)",
+                             gcstate->young.threshold,
+                             gcstate->old[0].threshold,
+                             gcstate->old[1].threshold);
+    }
     return Py_BuildValue("(iii)",
-                         gcstate->generations[0].threshold,
-                         gcstate->generations[1].threshold,
-                         gcstate->generations[2].threshold);
+                         gcstate->young.threshold,
+                         gcstate->young.aging_threshold,
+                         gcstate->old[0].threshold);
 #else
     return Py_BuildValue("(iii)",
                          gcstate->young.threshold,
@@ -227,15 +254,41 @@ gc_get_count_impl(PyObject *module)
 #endif
 
 #ifndef Py_GIL_DISABLED
+    if (gcstate->implementation == GC_IMPL_LEGACY) {
+        return Py_BuildValue("(iii)",
+                             gcstate->young.count,
+                             gcstate->old[0].count,
+                             gcstate->old[1].count);
+    }
     return Py_BuildValue("(iii)",
-                         gcstate->generations[0].count,
-                         gcstate->generations[1].count,
-                         gcstate->generations[2].count);
+                         1,
+                         0,
+                         gcstate->old[gcstate->visited_space].count);
 #else
     return Py_BuildValue("(iii)",
                          _Py_atomic_load_int_relaxed(&gcstate->young.count),
                          gcstate->old[0].count,
                          gcstate->old[1].count);
+#endif
+}
+
+/*[clinic input]
+gc.get_implementation
+
+Return the name of the active garbage collector implementation.
+[clinic start generated code]*/
+
+static PyObject *
+gc_get_implementation_impl(PyObject *module)
+/*[clinic end generated code: output=6589cbbd605fb918 input=1821e97b1d7bda5f]*/
+{
+#ifdef Py_GIL_DISABLED
+    return PyUnicode_FromString("legacy");
+#else
+    GCState *gcstate = get_gc_state();
+    const char *name = gcstate->implementation == GC_IMPL_INCREMENTAL
+        ? "incremental" : "legacy";
+    return PyUnicode_FromString(name);
 #endif
 }
 
@@ -391,12 +444,13 @@ gc_get_stats_impl(PyObject *module)
     for (i = 0; i < NUM_GENERATIONS; i++) {
         PyObject *dict;
         st = &stats[i];
-        dict = Py_BuildValue("{snsnsnsnsd}",
+        dict = Py_BuildValue("{snsnsnsnsdsd}",
                              "collections", st->collections,
                              "collected", st->collected,
                              "uncollectable", st->uncollectable,
                              "candidates", st->candidates,
-                             "duration", st->duration
+                             "duration", st->duration,
+                             "max_pause", st->max_pause
                             );
         if (dict == NULL)
             goto error;
@@ -508,6 +562,7 @@ PyDoc_STRVAR(gc__doc__,
 "disable() -- Disable automatic garbage collection.\n"
 "isenabled() -- Returns true if automatic collection is enabled.\n"
 "collect() -- Do a full collection right now.\n"
+"get_implementation() -- Return the active collector implementation.\n"
 "get_count() -- Return the current collection counts.\n"
 "get_stats() -- Return list of dictionaries containing per-generation stats.\n"
 "set_debug() -- Set debugging flags.\n"
@@ -530,6 +585,7 @@ static PyMethodDef GcMethods[] = {
     GC_SET_DEBUG_METHODDEF
     GC_GET_DEBUG_METHODDEF
     GC_GET_COUNT_METHODDEF
+    GC_GET_IMPLEMENTATION_METHODDEF
     GC_SET_THRESHOLD_METHODDEF
     GC_GET_THRESHOLD_METHODDEF
     GC_COLLECT_METHODDEF

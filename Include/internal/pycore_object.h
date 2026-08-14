@@ -857,7 +857,7 @@ _PyType_PreHeaderSize(PyTypeObject *tp)
     );
 }
 
-void _PyObject_GC_Link(PyObject *op);
+void _PyObject_GC_Link(PyObject *op, size_t size);
 
 // Usage: assert(_Py_CheckSlotResult(obj, "__getitem__", result != NULL));
 extern int _Py_CheckSlotResult(

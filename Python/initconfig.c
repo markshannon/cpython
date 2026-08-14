@@ -472,6 +472,10 @@ static const char usage_xoptions[] =
 "#s{-X} #L{frozen_modules}#b{=[on|off]}: whether to use frozen modules; the default is \"#B{on}\"\n"
 "         for installed Python and \"#B{off}\" for a local build;\n"
 "         also #e{PYTHON_FROZEN_MODULES}\n"
+#ifndef Py_GIL_DISABLED
+"#s{-X} #L{gc}#b{=[incremental|legacy]}: select the cyclic garbage collector;\n"
+"         the default is #B{incremental}\n"
+#endif
 #ifdef Py_GIL_DISABLED
 "#s{-X} #L{gil}#b{=[0|1]}: enable (#B{1}) or disable (#B{0}) the GIL; also #e{PYTHON_GIL}\n"
 #endif

@@ -387,15 +387,18 @@ surveyed the least often.
 > collection. Every collection operates on the entire heap.
 
 
-In order to decide when to run, the collector keeps track of the number of object
-allocations and deallocations since the last collection. When the number of
-allocations minus the number of deallocations exceeds `threshold0`,
-collection starts. Initially only generation 0 is examined. If generation 0 has
-been examined more than `threshold_1` times since generation 1 has been
-examined, then generation 1 is examined as well. With generation 2,
-things are a bit more complicated; see
+In a GIL-enabled build, the collector starts with an allocation budget of
+`threshold0 * 512` bytes. Each GC-managed object allocation is subtracted from
+that budget, and collection starts when it is exhausted and the nursery is not
+empty. Initially only generation 0 is examined. If generation 0 has been
+examined more than `threshold_1` times since generation 1 has been examined,
+then generation 1 is examined as well. With generation 2, things are a bit more
+complicated; see
 [Collecting the oldest generation](#Collecting-the-oldest-generation) for
 more information.
+
+The free-threaded build continues to trigger collection using the number of
+allocations minus deallocations rather than the byte budget.
 
 These thresholds can be examined using the
 [`gc.get_threshold()`](https://docs.python.org/3/library/gc.html#gc.get_threshold)

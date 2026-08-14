@@ -2922,12 +2922,6 @@ has_deferred_refcount(PyObject *self, PyObject *op)
 }
 
 static PyObject *
-get_tracked_heap_size(PyObject *self, PyObject *Py_UNUSED(ignored))
-{
-    return PyLong_FromInt64(PyInterpreterState_Get()->gc.heap_size);
-}
-
-static PyObject *
 is_static_immortal(PyObject *self, PyObject *op)
 {
     if (_Py_IsStaticImmortal(op)) {
@@ -3377,7 +3371,6 @@ static PyMethodDef module_functions[] = {
     {"get_static_builtin_types", get_static_builtin_types, METH_NOARGS},
     {"identify_type_slot_wrappers", identify_type_slot_wrappers, METH_NOARGS},
     {"has_deferred_refcount", has_deferred_refcount, METH_O},
-    {"get_tracked_heap_size", get_tracked_heap_size, METH_NOARGS},
     {"is_static_immortal", is_static_immortal, METH_O},
     {"incref_decref_delayed", incref_decref_delayed, METH_O},
     GET_NEXT_DICT_KEYS_VERSION_METHODDEF

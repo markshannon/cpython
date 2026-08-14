@@ -22,7 +22,7 @@ except ImportError:
 
 GC_STATS_FIELDS = (
     "gen", "iid", "ts_start", "ts_stop", "collections", "collected",
-    "uncollectable", "candidates", "heap_size", "duration")
+    "uncollectable", "candidates", "duration", "max_pause")
 
 
 def get_interpreter_identifiers(gc_stats) -> tuple[int,...]:
@@ -270,10 +270,12 @@ class TestGCStats(unittest.TestCase):
         self.assertGreater(after.ts_start, before.ts_start, (before, after))
         self.assertGreater(after.ts_stop, before.ts_stop, (before, after))
         self.assertGreater(after.duration, before.duration, (before, after))
-
-        self.assertGreater(after.candidates, before.candidates, (before, after))
+        self.assertGreaterEqual(
+            after.max_pause, before.max_pause, (before, after))
+        self.assertLessEqual(after.max_pause, after.duration, after)
 
         # may not grow
+        self.assertGreaterEqual(after.candidates, before.candidates, (before, after))
         self.assertGreaterEqual(after.collected, before.collected, (before, after))
         self.assertGreaterEqual(after.uncollectable, before.uncollectable, (before, after))
 

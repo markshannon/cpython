@@ -1665,7 +1665,7 @@ void
 _PyGC_InitState(GCState *gcstate)
 {
     // TODO: move to pycore_runtime_init.h once the incremental GC lands.
-    gcstate->young.threshold = 2000;
+    gcstate->young.threshold = _PyGC_DEFAULT_NURSERY_THRESHOLD;
 }
 
 
@@ -2290,6 +2290,7 @@ gc_collect_main(PyThreadState *tstate, int generation, _PyGC_Reason reason)
     stats->collected += m;
     stats->uncollectable += n;
     stats->duration += duration;
+    stats->max_pause = Py_MAX(stats->max_pause, duration);
     stats->candidates += state.candidates;
     PyMutex_Unlock(&gcstate->stats_mutex);
 
@@ -2704,7 +2705,7 @@ _Py_ScheduleGC(PyThreadState *tstate)
 }
 
 void
-_PyObject_GC_Link(PyObject *op)
+_PyObject_GC_Link(PyObject *op, size_t Py_UNUSED(size))
 {
     record_allocation(_PyThreadState_GET());
 }
